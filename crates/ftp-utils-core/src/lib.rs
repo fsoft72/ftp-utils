@@ -4,6 +4,7 @@
 //! See `docs/superpowers/specs/2026-09-21-ftp-utils-monorepo-design.md`
 //! for the design this crate implements.
 
+pub mod compare;
 pub mod diff;
 pub mod exclude;
 pub mod local;
