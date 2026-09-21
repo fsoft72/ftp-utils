@@ -6,6 +6,7 @@
 
 mod csv_input;
 mod filter;
+mod validate;
 
 fn main() {
     println!("ftpops: not yet implemented");
