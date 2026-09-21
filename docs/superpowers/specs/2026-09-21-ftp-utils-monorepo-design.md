@@ -68,10 +68,15 @@ Thin binary crate providing the CLI, built with `clap`.
   patterns, ftps, hash.
 - Any CLI flag explicitly provided overrides the corresponding JSON
   value.
-- The FTP password is **never** accepted via CLI flag or JSON config.
-  It is read exclusively from the `FTPDIFF_PASSWORD` environment
-  variable, to avoid leaking credentials via shell history or config
-  files committed to disk.
+- The FTP password is **never** accepted via JSON config (to avoid
+  leaking credentials via config files committed to disk). It is
+  resolved in this order: `--password` CLI flag > `FTPDIFF_PASSWORD`
+  environment variable > interactive hidden-input terminal prompt.
+  **Amendment (2026-09-21):** the original spec disallowed a CLI flag
+  entirely; a `--password` flag was added afterward at the user's
+  request, documented as the least preferred source since it can leak
+  into shell history and process listings - the env var and the prompt
+  remain the recommended ways to supply credentials.
 
 ### CLI flags
 

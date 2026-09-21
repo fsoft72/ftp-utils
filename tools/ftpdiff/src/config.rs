@@ -99,12 +99,26 @@ pub fn merge(cli: &Cli, json: &JsonConfig) -> Result<EffectiveConfig, ConfigErro
     })
 }
 
-/// Reads the FTP password from the `FTPDIFF_PASSWORD` environment
-/// variable. Never accepted via CLI flag or JSON config, to avoid leaking
-/// it into shell history or a config file on disk.
-pub fn read_password() -> Result<String, ConfigError> {
-    std::env::var("FTPDIFF_PASSWORD")
-        .map_err(|_| ConfigError("FTPDIFF_PASSWORD environment variable is not set".to_string()))
+/// Resolves the FTP password from the CLI flag or the `FTPDIFF_PASSWORD`
+/// environment variable, in that order. Returns `None` if neither is set,
+/// meaning the caller should fall back to an interactive prompt.
+fn password_from_cli_or_env(cli_password: Option<&str>) -> Option<String> {
+    cli_password
+        .map(|p| p.to_string())
+        .or_else(|| std::env::var("FTPDIFF_PASSWORD").ok())
+}
+
+/// Resolves the FTP password: `--password` flag, then `FTPDIFF_PASSWORD`
+/// environment variable, then an interactive hidden-input prompt. Prefer
+/// the environment variable or the prompt over the flag: a CLI argument
+/// can leak into shell history and process listings.
+pub fn read_password(cli_password: Option<&str>) -> Result<String, ConfigError> {
+    if let Some(password) = password_from_cli_or_env(cli_password) {
+        return Ok(password);
+    }
+
+    rpassword::prompt_password("FTP password: ")
+        .map_err(|e| ConfigError(format!("failed to read password from terminal: {e}")))
 }
 
 #[cfg(test)]
@@ -117,24 +131,35 @@ mod tests {
     static ENV_GUARD: Mutex<()> = Mutex::new(());
 
     #[test]
-    fn reads_password_from_env_var() {
+    fn resolves_password_from_env_var_when_cli_absent() {
         let _guard = ENV_GUARD.lock().unwrap();
         std::env::set_var("FTPDIFF_PASSWORD", "s3cr3t");
 
-        let result = read_password();
+        let result = password_from_cli_or_env(None);
 
-        assert_eq!(result.unwrap(), "s3cr3t");
+        assert_eq!(result, Some("s3cr3t".to_string()));
         std::env::remove_var("FTPDIFF_PASSWORD");
     }
 
     #[test]
-    fn errors_when_password_env_var_missing() {
+    fn cli_password_takes_precedence_over_env_var() {
+        let _guard = ENV_GUARD.lock().unwrap();
+        std::env::set_var("FTPDIFF_PASSWORD", "env-password");
+
+        let result = password_from_cli_or_env(Some("cli-password"));
+
+        assert_eq!(result, Some("cli-password".to_string()));
+        std::env::remove_var("FTPDIFF_PASSWORD");
+    }
+
+    #[test]
+    fn returns_none_when_neither_cli_nor_env_password_set() {
         let _guard = ENV_GUARD.lock().unwrap();
         std::env::remove_var("FTPDIFF_PASSWORD");
 
-        let result = read_password();
+        let result = password_from_cli_or_env(None);
 
-        assert!(result.is_err());
+        assert_eq!(result, None);
     }
 
     fn empty_cli() -> Cli {
@@ -149,6 +174,7 @@ mod tests {
             hash: false,
             exclude: Vec::new(),
             csv: None,
+            password: None,
         }
     }
 

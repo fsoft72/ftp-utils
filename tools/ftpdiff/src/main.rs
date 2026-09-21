@@ -40,7 +40,7 @@ fn run() -> i32 {
         }
     };
 
-    let password = match config::read_password() {
+    let password = match config::read_password(cli.password.as_deref()) {
         Ok(p) => p,
         Err(e) => {
             eprintln!("Error: {e}");

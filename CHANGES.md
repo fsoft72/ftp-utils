@@ -29,3 +29,9 @@
   TLS-enabled server (the local test fixture didn't have one configured);
   the code path builds and is covered by the trait-level design, but
   should get a real FTPS smoke test before relying on it in production.
+- Added a `--password` CLI flag and an interactive hidden-input prompt
+  (via `rpassword`) as a third password source. Precedence is now
+  `--password` > `FTPDIFF_PASSWORD` > interactive prompt. The flag is
+  documented as the least preferred option (shell history / process
+  listing exposure); the env var and prompt remain the recommended ways
+  to supply credentials.

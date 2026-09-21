@@ -42,6 +42,12 @@ pub struct Cli {
     /// Also write a structured CSV report to this path.
     #[arg(long)]
     pub csv: Option<PathBuf>,
+
+    /// FTP password. Prefer the FTPDIFF_PASSWORD environment variable or
+    /// the interactive prompt over this flag: a CLI argument can leak into
+    /// shell history and process listings.
+    #[arg(long)]
+    pub password: Option<String>,
 }
 
 #[cfg(test)]
@@ -79,5 +85,19 @@ mod tests {
         assert_eq!(cli.exclude, vec!["*.tmp".to_string(), ".git/*".to_string()]);
         assert!(cli.ftps);
         assert!(cli.hash);
+    }
+
+    #[test]
+    fn parses_password_flag() {
+        let cli = Cli::parse_from(["ftpdiff", "--password", "s3cr3t"]);
+
+        assert_eq!(cli.password.as_deref(), Some("s3cr3t"));
+    }
+
+    #[test]
+    fn password_defaults_to_none() {
+        let cli = Cli::parse_from(["ftpdiff"]);
+
+        assert_eq!(cli.password, None);
     }
 }
