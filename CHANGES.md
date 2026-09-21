@@ -58,3 +58,8 @@
   tool which needs the same host/user/password/local-dir/remote-dir/ftps/
   insecure-tls handling. No user-visible change to ftpdiff's CLI or config
   file format.
+- Extended `FtpConnection` with `store_from_buffer`, `delete`, and
+  `create_dir`, plus a default-implemented `ensure_remote_dir` built on
+  `list_dir` + `create_dir` (unit-tested via the mock; no live-server
+  test yet for `SuppaFtpConnection`'s implementation - recommended before
+  the upcoming `ftpops` tool relies on it against production data).

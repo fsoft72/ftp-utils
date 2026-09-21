@@ -102,6 +102,15 @@ pub trait FtpConnection {
 }
 ```
 
+**Refinement made during implementation (2026-09-21):** `ensure_remote_dir`
+is a **default-implemented** trait method built on `list_dir` and a new
+`create_dir` primitive (single-directory `mkdir`, parent must already
+exist), rather than something each `FtpConnection` implementer writes
+independently. This makes its component-splitting and already-exists
+logic unit-testable via the mock, matching this spec's stated testing
+intent, and means `SuppaFtpConnection` only needs to implement the
+simpler `create_dir`.
+
 `SuppaFtpConnection` implements:
 - `store_from_buffer` via `suppaftp`'s `put_file` (or `put_with_stream`
   with a `Cursor<&[u8]>`).
