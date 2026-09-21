@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/ftp-utils-core",
     "tools/ftpdiff",
+    "tools/ftpops",
 ]
 
 [workspace.package]
