@@ -74,3 +74,29 @@
   smoke-tested end-to-end against a real FTP server for the actual
   copy/delete network calls - recommended before relying on it against
   production data.
+- Added `--local-csv <path>` and `--remote-csv <path>` to ftpdiff: either
+  side of the comparison can now be read from a previous `ftpdiff --csv`
+  report instead of a live filesystem scan / FTP connection,
+  independently. `--local-dir`/`--host`+`--user`+`--remote-dir` become
+  unnecessary for the corresponding side (and, for `--remote-csv`, no
+  password is resolved and no connection is made at all). With `--hash`,
+  an MD5 already recorded in the source CSV is reused instead of being
+  recomputed; if unavailable and that side has no live fallback, the
+  entry is left at its size-only `Match` result rather than erroring.
+  Required extending `ftp-utils-core`'s `apply_hash_comparison` to make
+  its live connection/local-directory parameters optional and accept two
+  known-MD5 maps, and extracting `connection::merge_connection_partial`
+  (used only by ftpdiff; `ftpops` and `merge_connection` itself are
+  unaffected). Manually smoke-tested all four Live/Csv combinations for
+  local/remote plus the missing-setting error path.
+- Added `--build` to ftpdiff: scans exactly one side (`--local-dir`, or
+  `--host`/`--user`/`--remote-dir`) and writes it to `--csv` without
+  comparing - the producer counterpart to `--local-csv`/`--remote-csv`.
+  Requires `--csv`; requires exactly one live side; cannot combine with
+  `--local-csv`/`--remote-csv`. Entries get a new `DiffStatus::Scan`
+  status; with `--hash`, each file's own MD5 is computed unconditionally
+  (not just for matches, since nothing is being matched). Exit code is
+  always `0` or `2`, never `1`. Manually smoke-tested: local build with
+  `--hash`, round-tripping the output back in as `--local-csv`+
+  `--remote-csv`, and both error paths (missing `--csv`, both sides
+  given).

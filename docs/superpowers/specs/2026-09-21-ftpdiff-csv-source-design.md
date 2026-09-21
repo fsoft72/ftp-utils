@@ -43,12 +43,15 @@ Both are CLI-only (like `ftpops`'s own `--csv`), not settable via the
 `--config` JSON file - they describe what a single invocation compares
 against, not a reusable connection default.
 
-**Mutually exclusive with their live counterpart:** `--local-csv` and
-`--local-dir` cannot both be given; same for `--remote-csv` and
-`--remote-dir`/`--host`/`--user`/`--password`/`--ftps`/`--insecure-tls`.
-Passing both is a hard error (exit code `2`) before anything runs -
-consistent with how `ftpops` rejects invalid `--filter`/`--to`/`--on`
-combinations up front.
+**Precedence, not an error, when both are given (revised during
+implementation, 2026-09-21):** the original design called passing both
+`--local-csv` and `--local-dir` (or the remote equivalents) together a
+hard error. This was reconsidered while implementing: a shared
+`--config` JSON file legitimately supplies `local_dir`/`host`/etc. for
+multiple invocations, some of which may be CSV-sourced - erroring on
+their mere presence would break that reuse. Instead, the CSV flag simply
+takes precedence: the corresponding live setting, if also present, is
+unused (not validated, not required).
 
 **Conditional requirements:**
 
