@@ -63,3 +63,14 @@
   `list_dir` + `create_dir` (unit-tested via the mock; no live-server
   test yet for `SuppaFtpConnection`'s implementation - recommended before
   the upcoming `ftpops` tool relies on it against production data).
+- Added `ftpops`, a second tool in the monorepo: reads an `ftpdiff --csv`
+  report and performs `copy` (local<->remote) or `delete` (local/remote)
+  operations filtered by diff status (`RemoteOnly`/`LocalOnly`), with
+  `--dry-run` and `--skip-existing` (copy only). Validates the
+  `--filter`/`--to`/`--on` combination before touching the CSV or
+  connecting. Password via `--password` > `FTPOPS_PASSWORD` env var >
+  interactive prompt, same pattern as ftpdiff. Manually smoke-tested for
+  `--help`, the validation error path, and `--dry-run`; not yet
+  smoke-tested end-to-end against a real FTP server for the actual
+  copy/delete network calls - recommended before relying on it against
+  production data.

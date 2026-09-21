@@ -18,6 +18,21 @@ reporting differences by file size and, optionally, content hash.
 See `docs/superpowers/specs/2026-09-21-ftp-utils-monorepo-design.md` for
 the design spec.
 
+### ftpops
+
+Reads a CSV report produced by `ftpdiff --csv` and performs bulk `copy`
+(local<->remote) or `delete` (local/remote) operations, filtered by diff
+status (`RemoteOnly`/`LocalOnly`). Example: download every file marked
+`RemoteOnly` in a report:
+
+```sh
+ftpops copy --to local --filter remote-only --csv report.csv \
+  --host ftp.example.com --user myuser --remote-dir /var/www/site --local-dir ./site
+```
+
+See `docs/superpowers/specs/2026-09-21-ftpops-design.md` for the design
+spec.
+
 ## Building
 
 ```sh
