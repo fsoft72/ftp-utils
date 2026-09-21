@@ -249,8 +249,12 @@ checksum = "00b0228411908ca8685dba7fc2cdd70ec9990a6e753e89b6ac91a84c40fbaf4b"
 name = "ftp-utils-core"
 version = "0.1.0"
 dependencies = [
+ "clap",
  "glob",
  "md5",
+ "rpassword",
+ "serde",
+ "serde_json",
  "suppaftp",
  "tempfile",
  "walkdir",
