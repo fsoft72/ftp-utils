@@ -7,3 +7,4 @@
 pub mod diff;
 pub mod exclude;
 pub mod local;
+pub mod remote;
