@@ -52,3 +52,9 @@
   available in this session) - the earlier live-server smoke test already
   covered the underlying compare() call, and this change is additive to
   its signature only.
+- Refactored ftpdiff's connection/config/password handling into a shared
+  `ftp_utils_core::connection` module (`ConnectionArgs`, `ConnectionJsonConfig`,
+  `merge_connection`, `read_password`), in preparation for the `ftpops`
+  tool which needs the same host/user/password/local-dir/remote-dir/ftps/
+  insecure-tls handling. No user-visible change to ftpdiff's CLI or config
+  file format.

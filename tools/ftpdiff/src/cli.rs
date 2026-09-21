@@ -3,40 +3,14 @@
 use std::path::PathBuf;
 
 use clap::Parser;
+use ftp_utils_core::connection::ConnectionArgs;
 
 /// Compare a remote FTP/FTPS directory tree against a local copy.
 #[derive(Parser, Debug, Clone)]
 #[command(name = "ftpdiff", about = "Compare a remote FTP/FTPS directory tree against a local copy")]
 pub struct Cli {
-    /// Optional JSON config file providing defaults for the other options.
-    #[arg(long)]
-    pub config: Option<PathBuf>,
-
-    #[arg(long)]
-    pub host: Option<String>,
-
-    #[arg(long)]
-    pub port: Option<u16>,
-
-    #[arg(long)]
-    pub user: Option<String>,
-
-    #[arg(long = "remote-dir")]
-    pub remote_dir: Option<String>,
-
-    #[arg(long = "local-dir")]
-    pub local_dir: Option<PathBuf>,
-
-    /// Use explicit FTPS (AUTH TLS) instead of plain FTP.
-    #[arg(long)]
-    pub ftps: bool,
-
-    /// Accept any TLS certificate (expired, self-signed, hostname
-    /// mismatch) when using --ftps, instead of validating it. Only use
-    /// this for servers whose certificate you can't otherwise validate:
-    /// it removes protection against man-in-the-middle attacks.
-    #[arg(long = "insecure-tls")]
-    pub insecure_tls: bool,
+    #[command(flatten)]
+    pub connection: ConnectionArgs,
 
     /// Compare files by MD5 hash in addition to size.
     #[arg(long)]
@@ -49,12 +23,6 @@ pub struct Cli {
     /// Also write a structured CSV report to this path.
     #[arg(long)]
     pub csv: Option<PathBuf>,
-
-    /// FTP password. Prefer the FTPDIFF_PASSWORD environment variable or
-    /// the interactive prompt over this flag: a CLI argument can leak into
-    /// shell history and process listings.
-    #[arg(long)]
-    pub password: Option<String>,
 
     /// Print progress diagnostics (connecting, directory walk counts,
     /// hashing) to stderr as the comparison runs.
@@ -76,10 +44,10 @@ mod tests {
             "--local-dir", "./local",
         ]);
 
-        assert_eq!(cli.host.as_deref(), Some("ftp.example.com"));
-        assert_eq!(cli.user.as_deref(), Some("bob"));
-        assert_eq!(cli.remote_dir.as_deref(), Some("/remote"));
-        assert!(!cli.ftps);
+        assert_eq!(cli.connection.host.as_deref(), Some("ftp.example.com"));
+        assert_eq!(cli.connection.user.as_deref(), Some("bob"));
+        assert_eq!(cli.connection.remote_dir.as_deref(), Some("/remote"));
+        assert!(!cli.connection.ftps);
         assert!(!cli.hash);
         assert!(cli.exclude.is_empty());
     }
@@ -95,7 +63,7 @@ mod tests {
         ]);
 
         assert_eq!(cli.exclude, vec!["*.tmp".to_string(), ".git/*".to_string()]);
-        assert!(cli.ftps);
+        assert!(cli.connection.ftps);
         assert!(cli.hash);
     }
 
@@ -103,28 +71,28 @@ mod tests {
     fn parses_password_flag() {
         let cli = Cli::parse_from(["ftpdiff", "--password", "s3cr3t"]);
 
-        assert_eq!(cli.password.as_deref(), Some("s3cr3t"));
+        assert_eq!(cli.connection.password.as_deref(), Some("s3cr3t"));
     }
 
     #[test]
     fn password_defaults_to_none() {
         let cli = Cli::parse_from(["ftpdiff"]);
 
-        assert_eq!(cli.password, None);
+        assert_eq!(cli.connection.password, None);
     }
 
     #[test]
     fn parses_insecure_tls_flag() {
         let cli = Cli::parse_from(["ftpdiff", "--insecure-tls"]);
 
-        assert!(cli.insecure_tls);
+        assert!(cli.connection.insecure_tls);
     }
 
     #[test]
     fn insecure_tls_defaults_to_false() {
         let cli = Cli::parse_from(["ftpdiff"]);
 
-        assert!(!cli.insecure_tls);
+        assert!(!cli.connection.insecure_tls);
     }
 
     #[test]

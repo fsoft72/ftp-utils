@@ -21,7 +21,7 @@ fn main() {
 fn run() -> i32 {
     let cli = Cli::parse();
 
-    let json_config = match &cli.config {
+    let json_config = match &cli.connection.config {
         Some(path) => match config::load_json_config(path) {
             Ok(loaded) => loaded,
             Err(e) => {
@@ -40,7 +40,7 @@ fn run() -> i32 {
         }
     };
 
-    let password = match config::read_password(cli.password.as_deref()) {
+    let password = match config::read_password(cli.connection.password.as_deref()) {
         Ok(p) => p,
         Err(e) => {
             eprintln!("Error: {e}");
@@ -51,35 +51,42 @@ fn run() -> i32 {
     if effective.verbose {
         eprintln!(
             "Connecting to {}:{} as {} ({})...",
-            effective.host,
-            effective.port,
-            effective.user,
-            if effective.ftps { "FTPS" } else { "FTP" }
+            effective.connection.host,
+            effective.connection.port,
+            effective.connection.user,
+            if effective.connection.ftps { "FTPS" } else { "FTP" }
         );
     }
 
     let mut connection = match SuppaFtpConnection::connect(
-        &effective.host,
-        effective.port,
-        &effective.user,
+        &effective.connection.host,
+        effective.connection.port,
+        &effective.connection.user,
         &password,
-        effective.ftps,
-        effective.insecure_tls,
+        effective.connection.ftps,
+        effective.connection.insecure_tls,
     ) {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("Error: failed to connect to {}:{}: {e}", effective.host, effective.port);
+            eprintln!(
+                "Error: failed to connect to {}:{}: {e}",
+                effective.connection.host, effective.connection.port
+            );
             return 2;
         }
     };
 
     if effective.verbose {
-        eprintln!("Connected. Comparing {} against {}...", effective.local_dir.display(), effective.remote_dir);
+        eprintln!(
+            "Connected. Comparing {} against {}...",
+            effective.connection.local_dir.display(),
+            effective.connection.remote_dir
+        );
     }
 
     let options = CompareOptions {
-        local_dir: effective.local_dir.clone(),
-        remote_dir: effective.remote_dir.clone(),
+        local_dir: effective.connection.local_dir.clone(),
+        remote_dir: effective.connection.remote_dir.clone(),
         excludes: effective.exclude.clone(),
         hash: effective.hash,
     };
