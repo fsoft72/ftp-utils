@@ -18,7 +18,7 @@ pub enum DiffStatus {
 }
 
 /// A single comparison result for one relative path.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct DiffEntry {
     pub relative_path: String,
     pub status: DiffStatus,
@@ -26,4 +26,23 @@ pub struct DiffEntry {
     pub remote_size: Option<u64>,
     pub local_md5: Option<String>,
     pub remote_md5: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn diff_entries_with_same_fields_are_equal() {
+        let a = DiffEntry {
+            relative_path: "a.txt".to_string(),
+            status: DiffStatus::Match,
+            local_size: Some(10),
+            remote_size: Some(10),
+            local_md5: None,
+            remote_md5: None,
+        };
+        let b = a.clone();
+        assert_eq!(a, b);
+    }
 }
