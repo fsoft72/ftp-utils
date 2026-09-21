@@ -15,8 +15,9 @@ A suite of FTP tools written in Rust, organized as a Cargo workspace.
 Compares a remote directory tree (over FTP/FTPS) against a local copy,
 reporting differences by file size and, optionally, content hash.
 
-See `docs/superpowers/specs/2026-09-21-ftp-utils-monorepo-design.md` for
-the design spec.
+See [`docs/ftpdiff.md`](docs/ftpdiff.md) for full usage, or
+`docs/superpowers/specs/2026-09-21-ftp-utils-monorepo-design.md` for the
+design spec.
 
 ### ftpops
 
@@ -30,8 +31,8 @@ ftpops copy --to local --filter remote-only --csv report.csv \
   --host ftp.example.com --user myuser --remote-dir /var/www/site --local-dir ./site
 ```
 
-See `docs/superpowers/specs/2026-09-21-ftpops-design.md` for the design
-spec.
+See [`docs/ftpops.md`](docs/ftpops.md) for full usage, or
+`docs/superpowers/specs/2026-09-21-ftpops-design.md` for the design spec.
 
 ### `--config` JSON files
 
