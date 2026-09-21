@@ -95,49 +95,67 @@ pub fn load_json_config<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T
         .map_err(|e| ConnectionError(format!("invalid JSON in {}: {e}", path.display())))
 }
 
-/// Merges CLI args, JSON config, and defaults into `EffectiveConnection`.
-/// Precedence: CLI > JSON > default. Boolean flags merge as OR (CLI can
-/// enable, never disable, a JSON-set true).
+/// Resolved connection settings that don't require any field to be
+/// present - `host`/`user`/`remote_dir`/`local_dir` stay `Option`.
+/// `merge_connection` builds on this and additionally requires those
+/// four fields; callers with conditional requirements (like ftpdiff's
+/// `--local-csv`/`--remote-csv`) use this directly.
+#[derive(Debug, Clone)]
+pub struct PartialConnection {
+    pub host: Option<String>,
+    pub port: u16,
+    pub user: Option<String>,
+    pub remote_dir: Option<String>,
+    pub local_dir: Option<PathBuf>,
+    pub ftps: bool,
+    pub insecure_tls: bool,
+}
+
+/// Merges CLI args, JSON config, and defaults, without requiring any
+/// field to be present. Precedence: CLI > JSON > default. Boolean flags
+/// merge as OR (CLI can enable, never disable, a JSON-set true).
+pub fn merge_connection_partial(args: &ConnectionArgs, json: &ConnectionJsonConfig) -> PartialConnection {
+    PartialConnection {
+        host: args.host.clone().or_else(|| json.host.clone()),
+        port: args.port.or(json.port).unwrap_or(21),
+        user: args.user.clone().or_else(|| json.user.clone()),
+        remote_dir: args.remote_dir.clone().or_else(|| json.remote_dir.clone()),
+        local_dir: args.local_dir.clone().or_else(|| json.local_dir.clone()),
+        ftps: args.ftps || json.ftps.unwrap_or(false),
+        insecure_tls: args.insecure_tls || json.insecure_tls.unwrap_or(false),
+    }
+}
+
+/// Merges CLI args, JSON config, and defaults into `EffectiveConnection`,
+/// requiring `host`/`user`/`remote_dir`/`local_dir` to be resolvable from
+/// one of the two sources.
 pub fn merge_connection(
     args: &ConnectionArgs,
     json: &ConnectionJsonConfig,
 ) -> Result<EffectiveConnection, ConnectionError> {
-    let host = args
+    let partial = merge_connection_partial(args, json);
+
+    let host = partial
         .host
-        .clone()
-        .or_else(|| json.host.clone())
         .ok_or_else(|| ConnectionError("missing required setting: host (use --host or config file)".to_string()))?;
-
-    let user = args
+    let user = partial
         .user
-        .clone()
-        .or_else(|| json.user.clone())
         .ok_or_else(|| ConnectionError("missing required setting: user (use --user or config file)".to_string()))?;
-
-    let remote_dir = args
-        .remote_dir
-        .clone()
-        .or_else(|| json.remote_dir.clone())
-        .ok_or_else(|| {
-            ConnectionError("missing required setting: remote-dir (use --remote-dir or config file)".to_string())
-        })?;
-
-    let local_dir = args
-        .local_dir
-        .clone()
-        .or_else(|| json.local_dir.clone())
-        .ok_or_else(|| {
-            ConnectionError("missing required setting: local-dir (use --local-dir or config file)".to_string())
-        })?;
+    let remote_dir = partial.remote_dir.ok_or_else(|| {
+        ConnectionError("missing required setting: remote-dir (use --remote-dir or config file)".to_string())
+    })?;
+    let local_dir = partial.local_dir.ok_or_else(|| {
+        ConnectionError("missing required setting: local-dir (use --local-dir or config file)".to_string())
+    })?;
 
     Ok(EffectiveConnection {
         host,
-        port: args.port.or(json.port).unwrap_or(21),
+        port: partial.port,
         user,
         remote_dir,
         local_dir,
-        ftps: args.ftps || json.ftps.unwrap_or(false),
-        insecure_tls: args.insecure_tls || json.insecure_tls.unwrap_or(false),
+        ftps: partial.ftps,
+        insecure_tls: partial.insecure_tls,
     })
 }
 
@@ -272,6 +290,44 @@ mod tests {
         let effective = merge_connection(&args, &ConnectionJsonConfig::default()).unwrap();
 
         assert_eq!(effective.port, 21);
+    }
+
+    #[test]
+    fn partial_merge_never_errors_and_leaves_missing_fields_none() {
+        let effective = merge_connection_partial(&empty_args(), &ConnectionJsonConfig::default());
+
+        assert_eq!(effective.host, None);
+        assert_eq!(effective.user, None);
+        assert_eq!(effective.remote_dir, None);
+        assert_eq!(effective.local_dir, None);
+        assert_eq!(effective.port, 21);
+        assert!(!effective.ftps);
+        assert!(!effective.insecure_tls);
+    }
+
+    #[test]
+    fn partial_merge_applies_cli_over_json_precedence() {
+        let mut args = empty_args();
+        args.host = Some("cli-host".to_string());
+
+        let json = ConnectionJsonConfig { host: Some("json-host".to_string()), ..Default::default() };
+
+        let effective = merge_connection_partial(&args, &json);
+
+        assert_eq!(effective.host, Some("cli-host".to_string()));
+    }
+
+    #[test]
+    fn partial_merge_or_merges_booleans() {
+        let mut args = empty_args();
+        args.ftps = true;
+
+        let json = ConnectionJsonConfig { insecure_tls: Some(true), ..Default::default() };
+
+        let effective = merge_connection_partial(&args, &json);
+
+        assert!(effective.ftps);
+        assert!(effective.insecure_tls);
     }
 
     #[test]
