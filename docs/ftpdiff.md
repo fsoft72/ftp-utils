@@ -31,11 +31,16 @@ override the JSON file, which overrides built-in defaults.
 | `--exclude <glob>` | Glob pattern to exclude from comparison; repeatable |
 | `--csv <path>` | Also write a structured CSV report to this path |
 | `--verbose` | Print progress diagnostics to stderr as the comparison runs, including each file as it's checked |
+| `--local-csv <path>` | Read the local side from a previous `ftpdiff --csv` report instead of scanning `--local-dir` |
+| `--remote-csv <path>` | Read the remote side from a previous `ftpdiff --csv` report instead of connecting to the FTP server |
 | `-h`, `--help` | Print help |
 
-`host`, `user`, `remote-dir`, and `local-dir` are required (via CLI flag
-or config file); ftpdiff exits with an error (code `2`) if any is
-missing.
+`host`, `user`, and `remote-dir` are required unless `--remote-csv` is
+given; `local-dir` is required unless `--local-csv` is given. ftpdiff
+exits with an error (code `2`) if a required setting is missing, or if
+`--local-dir`/`--local-csv` or their remote equivalents are both given at
+once (they're mutually exclusive). See "Comparing against a CSV
+snapshot" below.
 
 ## Password
 
@@ -69,6 +74,26 @@ the underlying `suppaftp` client doesn't expose a public API for
 non-standard remote-hash commands (XMD5/MD5/HASH), so in practice every
 `--hash` comparison downloads the file - correct, just not optimized to
 skip the download when the server could have answered without it.
+
+### Comparing against a CSV snapshot
+
+Instead of scanning the local filesystem and/or connecting to the remote
+server, either side of the comparison can be read from a CSV report
+written by an earlier `ftpdiff --csv` run:
+
+- `--local-csv <path>` reads that report's `local_size`/`local_md5`
+  columns as the local side (rows without a `local_size` are skipped).
+- `--remote-csv <path>` reads its `remote_size`/`remote_md5` columns as
+  the remote side (rows without a `remote_size` are skipped).
+
+Each flag is independent. Using one still performs a live scan/connection
+for the other side. Using both compares two CSV files against each other
+with no filesystem or network access at all. `--exclude` still applies to
+entries loaded from a CSV, same as a live scan. With `--hash`, an MD5
+already recorded in the source CSV is reused instead of being
+recomputed; if it's missing (e.g. the original report wasn't generated
+with `--hash`) and that side has no live source to fall back to, that
+entry is left at its size-only `Match` result rather than erroring.
 
 ## Output
 
@@ -106,21 +131,55 @@ set) a note before writing the report.
 
 ## Examples
 
-Basic comparison:
+### Scan a remote directory and generate a CSV report
+
+A normal comparison run with `--csv` doubles as "scan the remote
+directory and record the result": the remote side is always scanned live
+unless `--remote-csv` is given, and `--csv` writes every entry (both
+sides) to a file:
+
+```sh
+ftpdiff --host ftp.example.com --user myuser \
+  --remote-dir /var/www/site --local-dir ./site \
+  --csv report.csv
+```
+
+`report.csv` now holds a full snapshot of the remote scan (its
+`remote_size`/`remote_md5` columns), which can later be reused as a
+`--remote-csv` input - see the third example below.
+
+### Compare a local directory against a remote directory
+
+The basic case: both sides scanned live, results printed to the
+terminal, no CSV written.
 
 ```sh
 ftpdiff --host ftp.example.com --user myuser \
   --remote-dir /var/www/site --local-dir ./site
 ```
 
-Comparison with hashing, excluding VCS/temp files, writing a CSV report:
+Add `--hash` to also verify content (not just size) for same-size files,
+and `--exclude` to skip VCS/temp files:
 
 ```sh
 ftpdiff --host ftp.example.com --user myuser \
   --remote-dir /var/www/site --local-dir ./site \
-  --hash --exclude '.git/*' --exclude '*.tmp' \
-  --csv report.csv
+  --hash --exclude '.git/*' --exclude '*.tmp'
 ```
+
+### Compare a local directory against a remote CSV snapshot, writing a CSV diff report
+
+Diff the current local filesystem against a previously recorded remote
+state (e.g. the `report.csv` produced by the first example above), with
+no FTP connection at all, and save the new diff as its own CSV:
+
+```sh
+ftpdiff --local-dir ./site --remote-csv report.csv \
+  --csv diff.csv
+```
+
+Since `--remote-csv` is given, `--host`/`--user`/`--remote-dir`/password
+are not needed - ftpdiff never connects to the server for this run.
 
 Using a config file plus FTPS with a self-signed certificate:
 
