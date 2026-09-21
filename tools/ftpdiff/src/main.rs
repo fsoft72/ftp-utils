@@ -6,6 +6,7 @@
 
 mod cli;
 mod config;
+mod csv_report;
 mod output;
 
 fn main() {
