@@ -62,6 +62,9 @@ combinations up front.
 as it does to a live scan - the exclude patterns filter the final entry
 list regardless of where it came from.
 
+A third new flag, `--build`, builds a `--csv` snapshot from a single live
+side without comparing - see "Build mode" below.
+
 ## Core changes (`ftp-utils-core`)
 
 ### New module: `csv_source`
@@ -280,6 +283,65 @@ output of one CSV-sourced run can be fed as the `--local-csv`/
   all four `Live`/`Csv` combinations before relying on this against
   production data, following the same pattern used for the original
   ftpdiff/ftpops manual smoke tests.
+- `ftpdiff::config`: tests for `--build`'s validation (requires `--csv`,
+  rejects combination with `--local-csv`/`--remote-csv`, requires exactly
+  one live side, errors on zero or two sides).
+- `ftpdiff::main` (build mode): manual smoke test - scanning one side
+  with and without `--hash`, verifying the written CSV round-trips
+  through `--local-csv`/`--remote-csv` correctly.
+
+## Build mode (`--build`)
+
+Added alongside the CSV-source flags (same feature area, same spec):
+`--build` scans exactly one side (local or remote) and writes it to
+`--csv` without comparing against the other side at all - the producer
+counterpart to `--local-csv`/`--remote-csv`. Typical use: build a full
+remote inventory (optionally with hashes) without needing the site
+checked out locally, to diff against later with `--remote-csv`.
+
+### CLI
+
+- `--build`: enables build mode. Requires `--csv <path>` (error otherwise:
+  `"--build requires --csv"`).
+- Cannot be combined with `--local-csv`/`--remote-csv` (error: `"--build
+  cannot be combined with --local-csv/--remote-csv"`) - build mode
+  produces a CSV from a live scan, it doesn't consume one.
+- Exactly one side's live settings must be configured: either `--local-dir`
+  alone, or `--host`/`--user`/`--remote-dir` alone. Both given is an
+  error (`"--build takes exactly one side: specify --local-dir, or
+  --host/--user/--remote-dir, not both"`); neither given is an error
+  (`"--build requires --local-dir, or --host/--user/--remote-dir"`).
+- `--hash`: computes each scanned file's own MD5 (local: direct read;
+  remote: `try_hash` then download-and-compute, same fallback as the
+  normal comparison flow) only when `--hash` is given - off by default,
+  since hashing every file is the slow path.
+- `--exclude` applies to the scan, same as normal.
+
+### Output
+
+Every scanned entry gets `DiffStatus::Scan` (a new `DiffStatus` variant -
+distinct from `LocalOnly`/`RemoteOnly`, which mean "compared, and only
+found on one side"; `Scan` means "not compared at all"). Only the
+scanned side's size (and, with `--hash`, MD5) column is populated in the
+written CSV - the other side's columns stay empty, identical in shape to
+how a normal report already leaves the absent side's columns empty for
+`LocalOnly`/`RemoteOnly` rows.
+
+`csv_source::read_local_entries`/`read_remote_entries` don't filter by
+the `status` column at all (they key off which size column is
+populated), so a build-mode CSV is a fully valid `--local-csv`/
+`--remote-csv` input with no special-casing needed on the reading side.
+
+Per-entry terminal output reuses the same colored-line format as a normal
+comparison (`output::format_entry`, extended with a `Scan` arm), followed
+by a `Scanned N entries.` line instead of the normal match/mismatch
+summary (which doesn't apply - nothing was compared).
+
+### Exit codes
+
+`0` on success, `2` on any error (connection, filesystem, or hashing
+failure). Never `1` - that code means "differences found," which has no
+meaning when nothing was compared.
 
 ## Out of scope for v1
 
