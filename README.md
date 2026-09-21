@@ -24,6 +24,12 @@ the design spec.
 cargo build --workspace
 ```
 
+To build release binaries for every tool and collect them in `bin/`:
+
+```sh
+scripts/build-all.sh
+```
+
 ## License
 
 MIT - see [LICENSE](LICENSE).
