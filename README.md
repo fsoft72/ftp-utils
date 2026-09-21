@@ -33,6 +33,12 @@ ftpops copy --to local --filter remote-only --csv report.csv \
 See `docs/superpowers/specs/2026-09-21-ftpops-design.md` for the design
 spec.
 
+### `--config` JSON files
+
+Every tool accepts `--config <path>` to a JSON file of default option
+values. See [`docs/json.md`](docs/json.md) for the full list of fields
+each tool accepts.
+
 ## Building
 
 ```sh
