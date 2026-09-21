@@ -4,6 +4,7 @@
 //! See `docs/superpowers/specs/2026-09-21-ftpops-design.md` for the
 //! design this binary implements.
 
+mod cli;
 mod csv_input;
 mod filter;
 mod validate;
