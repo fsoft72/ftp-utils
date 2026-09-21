@@ -38,6 +38,12 @@ pub struct Cli {
     /// instead of connecting to the FTP server.
     #[arg(long = "remote-csv")]
     pub remote_csv: Option<PathBuf>,
+
+    /// Scan exactly one side (--local-dir, or --host/--user/--remote-dir)
+    /// and write it to --csv without comparing. Cannot be combined with
+    /// --local-csv/--remote-csv.
+    #[arg(long)]
+    pub build: bool,
 }
 
 #[cfg(test)]
@@ -139,5 +145,19 @@ mod tests {
 
         assert_eq!(cli.local_csv, None);
         assert_eq!(cli.remote_csv, None);
+    }
+
+    #[test]
+    fn build_flag_defaults_to_false() {
+        let cli = Cli::parse_from(["ftpdiff"]);
+
+        assert!(!cli.build);
+    }
+
+    #[test]
+    fn parses_build_flag() {
+        let cli = Cli::parse_from(["ftpdiff", "--build"]);
+
+        assert!(cli.build);
     }
 }

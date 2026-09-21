@@ -51,6 +51,84 @@ pub fn load_json_config(path: &Path) -> Result<JsonConfig, ConfigError> {
     connection::load_json_config(path)
 }
 
+/// Which side `--build` scans.
+#[derive(Debug, Clone)]
+pub enum BuildSide {
+    Local(PathBuf),
+    Remote { host: String, port: u16, user: String, remote_dir: String, ftps: bool, insecure_tls: bool },
+}
+
+/// Resolved settings for a `--build` run.
+#[derive(Debug, Clone)]
+pub struct BuildConfig {
+    pub side: BuildSide,
+    pub hash: bool,
+    pub exclude: Vec<String>,
+    pub csv: PathBuf,
+    pub verbose: bool,
+}
+
+/// Resolves a `--build` run's settings. Requires `--csv`; rejects
+/// `--local-csv`/`--remote-csv` (build mode produces a CSV, it doesn't
+/// consume one); requires exactly one live side.
+pub fn merge_build(cli: &Cli, json: &JsonConfig) -> Result<BuildConfig, ConfigError> {
+    let csv = cli.csv.clone().ok_or_else(|| ConfigError("--build requires --csv".to_string()))?;
+
+    if cli.local_csv.is_some() || cli.remote_csv.is_some() {
+        return Err(ConfigError(
+            "--build cannot be combined with --local-csv/--remote-csv".to_string(),
+        ));
+    }
+
+    let partial = connection::merge_connection_partial(&cli.connection, &json.connection);
+    let has_local = partial.local_dir.is_some();
+    let has_remote = partial.host.is_some() || partial.user.is_some() || partial.remote_dir.is_some();
+
+    if has_local && has_remote {
+        return Err(ConfigError(
+            "--build takes exactly one side: specify --local-dir, or --host/--user/--remote-dir, not both"
+                .to_string(),
+        ));
+    }
+
+    let side = if has_local {
+        BuildSide::Local(partial.local_dir.unwrap())
+    } else if has_remote {
+        let host = partial
+            .host
+            .ok_or_else(|| ConfigError("missing required setting: host for --build".to_string()))?;
+        let user = partial
+            .user
+            .ok_or_else(|| ConfigError("missing required setting: user for --build".to_string()))?;
+        let remote_dir = partial
+            .remote_dir
+            .ok_or_else(|| ConfigError("missing required setting: remote-dir for --build".to_string()))?;
+        BuildSide::Remote {
+            host,
+            port: partial.port,
+            user,
+            remote_dir,
+            ftps: partial.ftps,
+            insecure_tls: partial.insecure_tls,
+        }
+    } else {
+        return Err(ConfigError(
+            "--build requires --local-dir, or --host/--user/--remote-dir".to_string(),
+        ));
+    };
+
+    let mut exclude = json.exclude.clone();
+    exclude.extend(cli.exclude.clone());
+
+    Ok(BuildConfig {
+        side,
+        hash: cli.hash || json.hash.unwrap_or(false),
+        exclude,
+        csv,
+        verbose: cli.verbose || json.verbose.unwrap_or(false),
+    })
+}
+
 /// Resolves `LocalSource`/`RemoteSource` and ftpdiff's own fields.
 /// `--local-csv` makes `--local-dir` unnecessary; `--remote-csv` makes
 /// `--host`/`--user`/`--remote-dir` (and password/FTPS settings)
@@ -139,6 +217,7 @@ mod tests {
             verbose: false,
             local_csv: None,
             remote_csv: None,
+            build: false,
         }
     }
 
@@ -260,6 +339,95 @@ mod tests {
         let effective = merge(&cli, &json).unwrap();
 
         assert_eq!(effective.exclude, vec![".git/*".to_string(), "*.tmp".to_string()]);
+    }
+
+    #[test]
+    fn build_requires_csv() {
+        let mut cli = empty_cli();
+        cli.build = true;
+        cli.connection.local_dir = Some(PathBuf::from("./l"));
+
+        let result = merge_build(&cli, &JsonConfig::default());
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn build_rejects_local_csv() {
+        let mut cli = empty_cli();
+        cli.build = true;
+        cli.csv = Some(PathBuf::from("out.csv"));
+        cli.connection.local_dir = Some(PathBuf::from("./l"));
+        cli.local_csv = Some(PathBuf::from("in.csv"));
+
+        let result = merge_build(&cli, &JsonConfig::default());
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn build_rejects_remote_csv() {
+        let mut cli = empty_cli();
+        cli.build = true;
+        cli.csv = Some(PathBuf::from("out.csv"));
+        cli.connection.local_dir = Some(PathBuf::from("./l"));
+        cli.remote_csv = Some(PathBuf::from("in.csv"));
+
+        let result = merge_build(&cli, &JsonConfig::default());
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn build_resolves_local_side_alone() {
+        let mut cli = empty_cli();
+        cli.build = true;
+        cli.csv = Some(PathBuf::from("out.csv"));
+        cli.connection.local_dir = Some(PathBuf::from("./l"));
+
+        let build = merge_build(&cli, &JsonConfig::default()).unwrap();
+
+        assert!(matches!(build.side, BuildSide::Local(ref p) if p == &PathBuf::from("./l")));
+    }
+
+    #[test]
+    fn build_resolves_remote_side_alone() {
+        let mut cli = empty_cli();
+        cli.build = true;
+        cli.csv = Some(PathBuf::from("out.csv"));
+        cli.connection.host = Some("h".into());
+        cli.connection.user = Some("u".into());
+        cli.connection.remote_dir = Some("/r".into());
+
+        let build = merge_build(&cli, &JsonConfig::default()).unwrap();
+
+        assert!(matches!(build.side, BuildSide::Remote { ref host, .. } if host == "h"));
+    }
+
+    #[test]
+    fn build_errors_when_both_sides_given() {
+        let mut cli = empty_cli();
+        cli.build = true;
+        cli.csv = Some(PathBuf::from("out.csv"));
+        cli.connection.local_dir = Some(PathBuf::from("./l"));
+        cli.connection.host = Some("h".into());
+        cli.connection.user = Some("u".into());
+        cli.connection.remote_dir = Some("/r".into());
+
+        let result = merge_build(&cli, &JsonConfig::default());
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn build_errors_when_neither_side_given() {
+        let mut cli = empty_cli();
+        cli.build = true;
+        cli.csv = Some(PathBuf::from("out.csv"));
+
+        let result = merge_build(&cli, &JsonConfig::default());
+
+        assert!(result.is_err());
     }
 
     #[test]
