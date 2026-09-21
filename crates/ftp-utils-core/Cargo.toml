@@ -9,5 +9,7 @@ description = "Shared FTP/FTPS client, diff, and comparison logic for the ftp-ut
 suppaftp.workspace = true
 glob.workspace = true
 walkdir.workspace = true
-serde.workspace = true
 md5.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
