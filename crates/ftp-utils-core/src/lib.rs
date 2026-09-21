@@ -6,6 +6,7 @@
 
 pub mod compare;
 pub mod connection;
+pub mod csv_source;
 pub mod diff;
 pub mod exclude;
 pub mod ftp_client;
