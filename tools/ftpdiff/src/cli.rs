@@ -28,6 +28,16 @@ pub struct Cli {
     /// hashing) to stderr as the comparison runs.
     #[arg(long)]
     pub verbose: bool,
+
+    /// Read the local side from a previous `ftpdiff --csv` report
+    /// instead of scanning --local-dir.
+    #[arg(long = "local-csv")]
+    pub local_csv: Option<PathBuf>,
+
+    /// Read the remote side from a previous `ftpdiff --csv` report
+    /// instead of connecting to the FTP server.
+    #[arg(long = "remote-csv")]
+    pub remote_csv: Option<PathBuf>,
 }
 
 #[cfg(test)]
@@ -107,5 +117,27 @@ mod tests {
         let cli = Cli::parse_from(["ftpdiff"]);
 
         assert!(!cli.verbose);
+    }
+
+    #[test]
+    fn parses_local_csv_flag() {
+        let cli = Cli::parse_from(["ftpdiff", "--local-csv", "snapshot.csv"]);
+
+        assert_eq!(cli.local_csv, Some(PathBuf::from("snapshot.csv")));
+    }
+
+    #[test]
+    fn parses_remote_csv_flag() {
+        let cli = Cli::parse_from(["ftpdiff", "--remote-csv", "snapshot.csv"]);
+
+        assert_eq!(cli.remote_csv, Some(PathBuf::from("snapshot.csv")));
+    }
+
+    #[test]
+    fn csv_source_flags_default_to_none() {
+        let cli = Cli::parse_from(["ftpdiff"]);
+
+        assert_eq!(cli.local_csv, None);
+        assert_eq!(cli.remote_csv, None);
     }
 }
