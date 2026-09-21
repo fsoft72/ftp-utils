@@ -3,6 +3,7 @@
 
 use suppaftp::list::ListParser;
 use suppaftp::native_tls::TlsConnector;
+use suppaftp::types::FileType;
 use suppaftp::{FtpStream, NativeTlsConnector, NativeTlsFtpStream};
 
 use crate::remote::{FtpConnection, FtpConnectionError, RawRemoteEntry};
@@ -17,7 +18,10 @@ pub enum SuppaFtpConnection {
 
 impl SuppaFtpConnection {
     /// Connects and authenticates. Uses explicit FTPS (AUTH TLS upgrade on
-    /// the plain control channel) when `ftps` is true.
+    /// the plain control channel) when `ftps` is true. Switches to binary
+    /// (`TYPE I`) transfer mode, since the FTP default of ASCII mode
+    /// rewrites line endings in transit and would corrupt size/hash
+    /// comparisons for any file containing `\n`.
     pub fn connect(
         host: &str,
         port: u16,
@@ -37,12 +41,18 @@ impl SuppaFtpConnection {
             stream
                 .login(user, password)
                 .map_err(|e| FtpConnectionError(e.to_string()))?;
+            stream
+                .transfer_type(FileType::Binary)
+                .map_err(|e| FtpConnectionError(e.to_string()))?;
             Ok(SuppaFtpConnection::Tls(stream))
         } else {
             let mut stream =
                 FtpStream::connect(&address).map_err(|e| FtpConnectionError(e.to_string()))?;
             stream
                 .login(user, password)
+                .map_err(|e| FtpConnectionError(e.to_string()))?;
+            stream
+                .transfer_type(FileType::Binary)
                 .map_err(|e| FtpConnectionError(e.to_string()))?;
             Ok(SuppaFtpConnection::Plain(stream))
         }
