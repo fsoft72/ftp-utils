@@ -45,10 +45,13 @@ pub trait FtpConnection {
 
 /// Recursively walks `root` on the remote server, returning one entry per
 /// file, skipping any file whose relative path matches one of `excludes`.
+/// Calls `progress` (if given) with a human-readable message for every
+/// included file, for `--verbose` output.
 pub fn walk_remote<C: FtpConnection>(
     conn: &mut C,
     root: &str,
     excludes: &[String],
+    mut progress: Option<&mut (dyn FnMut(&str) + '_)>,
 ) -> Result<Vec<RemoteEntry>, FtpConnectionError> {
     let mut entries = Vec::new();
     let mut dirs_to_visit: Vec<String> = vec![String::new()]; // "" means root itself
@@ -74,6 +77,10 @@ pub fn walk_remote<C: FtpConnection>(
 
             if is_excluded(&relative_path, excludes) {
                 continue;
+            }
+
+            if let Some(cb) = progress.as_deref_mut() {
+                cb(&format!("remote: {relative_path}"));
             }
 
             entries.push(RemoteEntry { relative_path, size: item.size });
@@ -125,7 +132,7 @@ mod tests {
         );
         let mut conn = MockFtpConnection { listings };
 
-        let mut entries = walk_remote(&mut conn, "/remote", &[]).unwrap();
+        let mut entries = walk_remote(&mut conn, "/remote", &[], None).unwrap();
         entries.sort_by(|a, b| a.relative_path.cmp(&b.relative_path));
 
         assert_eq!(
@@ -149,9 +156,29 @@ mod tests {
         );
         let mut conn = MockFtpConnection { listings };
 
-        let entries = walk_remote(&mut conn, "/remote", &["*.tmp".to_string()]).unwrap();
+        let entries = walk_remote(&mut conn, "/remote", &["*.tmp".to_string()], None).unwrap();
 
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].relative_path, "keep.txt");
+    }
+
+    #[test]
+    fn reports_progress_for_included_files_only() {
+        let mut listings = HashMap::new();
+        listings.insert(
+            "/remote".to_string(),
+            vec![
+                RawRemoteEntry { name: "keep.txt".into(), is_dir: false, size: 1 },
+                RawRemoteEntry { name: "skip.tmp".into(), is_dir: false, size: 1 },
+            ],
+        );
+        let mut conn = MockFtpConnection { listings };
+
+        let mut messages = Vec::new();
+        let mut progress = |msg: &str| messages.push(msg.to_string());
+
+        walk_remote(&mut conn, "/remote", &["*.tmp".to_string()], Some(&mut progress)).unwrap();
+
+        assert_eq!(messages, vec!["remote: keep.txt".to_string()]);
     }
 }

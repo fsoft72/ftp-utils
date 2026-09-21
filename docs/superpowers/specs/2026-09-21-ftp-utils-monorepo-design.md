@@ -94,7 +94,7 @@ Thin binary crate providing the CLI, built with `clap`.
 | `--exclude <glob>` | Glob pattern to exclude from comparison (repeatable) |
 | `--csv <path>` | Also write a structured CSV report to this path |
 | `--password <password>` | FTP password (least preferred source; see amendment above) |
-| `--verbose` | Print progress diagnostics to stderr as the comparison runs |
+| `--verbose` | Print progress diagnostics to stderr as the comparison runs, including each file as it's checked (local walk, remote walk, hashing) |
 
 Password resolution: `--password` > `FTPDIFF_PASSWORD` environment
 variable > interactive hidden-input prompt (see amendment above).

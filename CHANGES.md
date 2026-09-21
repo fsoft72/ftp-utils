@@ -42,3 +42,13 @@
   certificate can't otherwise be validated.
 - Added `--verbose`: prints progress diagnostics (connecting, comparison
   start/end with entry count, CSV write) to stderr as ftpdiff runs.
+- Extended `--verbose` to also print each file as it's checked: `walk_local_dir`,
+  `walk_remote`, and `apply_hash_comparison` in ftp-utils-core now take an
+  optional `progress: Option<&mut (dyn FnMut(&str) + '_)>` callback, called
+  per included file ("local: <path>", "remote: <path>", "hash: <path>"),
+  threaded through `compare()`. Verified via 7 new unit tests (message
+  content and ordering across local/remote/hash phases); not re-verified
+  against a live FTP server for this change (no local test server
+  available in this session) - the earlier live-server smoke test already
+  covered the underlying compare() call, and this change is additive to
+  its signature only.

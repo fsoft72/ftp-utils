@@ -11,15 +11,22 @@ use crate::remote::FtpConnection;
 /// For every entry currently marked `Match`, computes and compares MD5
 /// hashes, updating `status` to `Match` or `HashMismatch` and filling in
 /// `local_md5`/`remote_md5`. Entries with any other status are untouched.
+/// Calls `progress` (if given) with a human-readable message for every
+/// entry actually hashed, for `--verbose` output.
 pub fn apply_hash_comparison<C: FtpConnection>(
     conn: &mut C,
     remote_root: &str,
     local_root: &Path,
     entries: &mut [DiffEntry],
+    mut progress: Option<&mut (dyn FnMut(&str) + '_)>,
 ) -> std::io::Result<()> {
     for entry in entries.iter_mut() {
         if entry.status != DiffStatus::Match {
             continue;
+        }
+
+        if let Some(cb) = progress.as_deref_mut() {
+            cb(&format!("hash: {}", entry.relative_path));
         }
 
         let remote_path = format!("{remote_root}/{}", entry.relative_path);
@@ -94,7 +101,7 @@ mod tests {
         let mut entries = vec![entry("f.txt")];
         let mut conn = MockConnection { hash: Some(expected_hash.clone()), remote_bytes: Vec::new() };
 
-        apply_hash_comparison(&mut conn, "/remote", dir.path(), &mut entries).unwrap();
+        apply_hash_comparison(&mut conn, "/remote", dir.path(), &mut entries, None).unwrap();
 
         assert_eq!(entries[0].status, DiffStatus::Match);
         assert_eq!(entries[0].remote_md5, Some(expected_hash));
@@ -108,7 +115,7 @@ mod tests {
         let mut entries = vec![entry("f.txt")];
         let mut conn = MockConnection { hash: None, remote_bytes: b"different".to_vec() };
 
-        apply_hash_comparison(&mut conn, "/remote", dir.path(), &mut entries).unwrap();
+        apply_hash_comparison(&mut conn, "/remote", dir.path(), &mut entries, None).unwrap();
 
         assert_eq!(entries[0].status, DiffStatus::HashMismatch);
     }
@@ -126,9 +133,35 @@ mod tests {
         }];
         let mut conn = MockConnection { hash: None, remote_bytes: Vec::new() };
 
-        apply_hash_comparison(&mut conn, "/remote", dir.path(), &mut entries).unwrap();
+        apply_hash_comparison(&mut conn, "/remote", dir.path(), &mut entries, None).unwrap();
 
         assert_eq!(entries[0].status, DiffStatus::LocalOnly);
         assert_eq!(entries[0].remote_md5, None);
+    }
+
+    #[test]
+    fn reports_progress_only_for_hashed_entries() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("f.txt"), b"hello").unwrap();
+
+        let mut entries = vec![
+            entry("f.txt"),
+            DiffEntry {
+                relative_path: "only-local.txt".to_string(),
+                status: DiffStatus::LocalOnly,
+                local_size: Some(5),
+                remote_size: None,
+                local_md5: None,
+                remote_md5: None,
+            },
+        ];
+        let mut conn = MockConnection { hash: None, remote_bytes: b"hello".to_vec() };
+
+        let mut messages = Vec::new();
+        let mut progress = |msg: &str| messages.push(msg.to_string());
+
+        apply_hash_comparison(&mut conn, "/remote", dir.path(), &mut entries, Some(&mut progress)).unwrap();
+
+        assert_eq!(messages, vec!["hash: f.txt".to_string()]);
     }
 }

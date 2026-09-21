@@ -13,8 +13,13 @@ pub struct LocalEntry {
 
 /// Recursively walks `root`, returning one entry per file (not directory),
 /// skipping any file whose path (relative to `root`, using `/` separators)
-/// matches one of `excludes`.
-pub fn walk_local_dir(root: &Path, excludes: &[String]) -> std::io::Result<Vec<LocalEntry>> {
+/// matches one of `excludes`. Calls `progress` (if given) with a
+/// human-readable message for every included file, for `--verbose` output.
+pub fn walk_local_dir(
+    root: &Path,
+    excludes: &[String],
+    mut progress: Option<&mut (dyn FnMut(&str) + '_)>,
+) -> std::io::Result<Vec<LocalEntry>> {
     let mut entries = Vec::new();
 
     for result in walkdir::WalkDir::new(root) {
@@ -39,6 +44,10 @@ pub fn walk_local_dir(root: &Path, excludes: &[String]) -> std::io::Result<Vec<L
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?
             .len();
 
+        if let Some(cb) = progress.as_deref_mut() {
+            cb(&format!("local: {relative}"));
+        }
+
         entries.push(LocalEntry { relative_path: relative, size });
     }
 
@@ -57,7 +66,7 @@ mod tests {
         fs::create_dir(dir.path().join("sub")).unwrap();
         fs::write(dir.path().join("sub/b.txt"), b"world!").unwrap();
 
-        let mut entries = walk_local_dir(dir.path(), &[]).unwrap();
+        let mut entries = walk_local_dir(dir.path(), &[], None).unwrap();
         entries.sort_by(|a, b| a.relative_path.cmp(&b.relative_path));
 
         assert_eq!(
@@ -75,9 +84,23 @@ mod tests {
         fs::write(dir.path().join("keep.txt"), b"x").unwrap();
         fs::write(dir.path().join("skip.tmp"), b"y").unwrap();
 
-        let entries = walk_local_dir(dir.path(), &["*.tmp".to_string()]).unwrap();
+        let entries = walk_local_dir(dir.path(), &["*.tmp".to_string()], None).unwrap();
 
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].relative_path, "keep.txt");
+    }
+
+    #[test]
+    fn reports_progress_for_included_files_only() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("keep.txt"), b"x").unwrap();
+        fs::write(dir.path().join("skip.tmp"), b"y").unwrap();
+
+        let mut messages = Vec::new();
+        let mut progress = |msg: &str| messages.push(msg.to_string());
+
+        walk_local_dir(dir.path(), &["*.tmp".to_string()], Some(&mut progress)).unwrap();
+
+        assert_eq!(messages, vec!["local: keep.txt".to_string()]);
     }
 }

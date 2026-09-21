@@ -57,16 +57,20 @@ impl From<FtpConnectionError> for CompareError {
 
 /// Walks the local and remote directory trees, diffs them by size, and
 /// (if `opts.hash` is set) upgrades same-size matches with an MD5 check.
+/// Calls `progress` (if given) with a human-readable message for every
+/// file examined (local walk, remote walk, hashing), for `--verbose`
+/// output.
 pub fn compare<C: FtpConnection>(
     conn: &mut C,
     opts: &CompareOptions,
+    mut progress: Option<&mut (dyn FnMut(&str) + '_)>,
 ) -> Result<Vec<DiffEntry>, CompareError> {
-    let local_entries = local::walk_local_dir(&opts.local_dir, &opts.excludes)?;
-    let remote_entries = remote::walk_remote(conn, &opts.remote_dir, &opts.excludes)?;
+    let local_entries = local::walk_local_dir(&opts.local_dir, &opts.excludes, progress.as_deref_mut())?;
+    let remote_entries = remote::walk_remote(conn, &opts.remote_dir, &opts.excludes, progress.as_deref_mut())?;
     let mut entries = compare::compare_entries(&local_entries, &remote_entries);
 
     if opts.hash {
-        hash::apply_hash_comparison(conn, &opts.remote_dir, &opts.local_dir, &mut entries)?;
+        hash::apply_hash_comparison(conn, &opts.remote_dir, &opts.local_dir, &mut entries, progress.as_deref_mut())?;
     }
 
     Ok(entries)
@@ -122,7 +126,7 @@ mod tests {
             hash: false,
         };
 
-        let entries = compare(&mut conn, &opts).unwrap();
+        let entries = compare(&mut conn, &opts, None).unwrap();
 
         assert!(entries
             .iter()
@@ -133,5 +137,32 @@ mod tests {
         assert!(entries
             .iter()
             .any(|e| e.relative_path == "shared.txt" && e.status == DiffStatus::Match));
+    }
+
+    #[test]
+    fn reports_progress_across_local_and_remote_walks() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("local.txt"), b"x").unwrap();
+
+        let mut listings = HashMap::new();
+        listings.insert(
+            "/remote".to_string(),
+            vec![RawRemoteEntry { name: "remote.txt".into(), is_dir: false, size: 1 }],
+        );
+        let mut conn = MockConnection { listings };
+
+        let opts = CompareOptions {
+            local_dir: dir.path().to_path_buf(),
+            remote_dir: "/remote".to_string(),
+            excludes: Vec::new(),
+            hash: false,
+        };
+
+        let mut messages = Vec::new();
+        let mut progress = |msg: &str| messages.push(msg.to_string());
+
+        compare(&mut conn, &opts, Some(&mut progress)).unwrap();
+
+        assert_eq!(messages, vec!["local: local.txt".to_string(), "remote: remote.txt".to_string()]);
     }
 }

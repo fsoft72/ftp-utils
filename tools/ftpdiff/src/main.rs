@@ -84,7 +84,13 @@ fn run() -> i32 {
         hash: effective.hash,
     };
 
-    let entries = match compare(&mut connection, &options) {
+    let mut progress: Option<Box<dyn FnMut(&str)>> = if effective.verbose {
+        Some(Box::new(|msg: &str| eprintln!("Checking {msg}")))
+    } else {
+        None
+    };
+
+    let entries = match compare(&mut connection, &options, progress.as_deref_mut()) {
         Ok(entries) => entries,
         Err(e) => {
             eprintln!("Error: comparison failed: {e}");
