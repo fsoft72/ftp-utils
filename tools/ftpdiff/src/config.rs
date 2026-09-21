@@ -99,9 +99,43 @@ pub fn merge(cli: &Cli, json: &JsonConfig) -> Result<EffectiveConfig, ConfigErro
     })
 }
 
+/// Reads the FTP password from the `FTPDIFF_PASSWORD` environment
+/// variable. Never accepted via CLI flag or JSON config, to avoid leaking
+/// it into shell history or a config file on disk.
+pub fn read_password() -> Result<String, ConfigError> {
+    std::env::var("FTPDIFF_PASSWORD")
+        .map_err(|_| ConfigError("FTPDIFF_PASSWORD environment variable is not set".to_string()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+
+    // FTPDIFF_PASSWORD is process-global state; serialize the two tests
+    // that touch it so they can't race under parallel test execution.
+    static ENV_GUARD: Mutex<()> = Mutex::new(());
+
+    #[test]
+    fn reads_password_from_env_var() {
+        let _guard = ENV_GUARD.lock().unwrap();
+        std::env::set_var("FTPDIFF_PASSWORD", "s3cr3t");
+
+        let result = read_password();
+
+        assert_eq!(result.unwrap(), "s3cr3t");
+        std::env::remove_var("FTPDIFF_PASSWORD");
+    }
+
+    #[test]
+    fn errors_when_password_env_var_missing() {
+        let _guard = ENV_GUARD.lock().unwrap();
+        std::env::remove_var("FTPDIFF_PASSWORD");
+
+        let result = read_password();
+
+        assert!(result.is_err());
+    }
 
     fn empty_cli() -> Cli {
         Cli {
