@@ -7,6 +7,7 @@
 pub mod compare;
 pub mod diff;
 pub mod exclude;
+pub mod ftp_client;
 pub mod hash;
 pub mod local;
 pub mod remote;
