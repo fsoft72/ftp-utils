@@ -15,6 +15,9 @@ pub enum DiffStatus {
     HashMismatch,
     /// File matches on both sides.
     Match,
+    /// Scanned by `--build`, not compared against the other side (that
+    /// side wasn't scanned at all).
+    Scan,
 }
 
 /// A single comparison result for one relative path.

@@ -17,6 +17,7 @@ pub fn format_entry(entry: &DiffEntry) -> String {
         ),
         DiffStatus::HashMismatch => format!("{} {} (hash differs)", "~".yellow(), entry.relative_path),
         DiffStatus::Match => format!("{} {}", "=".dimmed(), entry.relative_path),
+        DiffStatus::Scan => format!("{} {}", "*".cyan(), entry.relative_path),
     }
 }
 
@@ -39,6 +40,9 @@ pub fn summarize(entries: &[DiffEntry]) -> Summary {
             DiffStatus::SizeMismatch => summary.size_mismatch += 1,
             DiffStatus::HashMismatch => summary.hash_mismatch += 1,
             DiffStatus::Match => summary.matched += 1,
+            // Never produced by compare_entries; --build mode has its own
+            // "Scanned N entries." line instead of this summary.
+            DiffStatus::Scan => {}
         }
     }
     summary
@@ -76,6 +80,7 @@ mod tests {
         assert!(format_entry(&entry("c.txt", DiffStatus::SizeMismatch)).contains("c.txt"));
         assert!(format_entry(&entry("d.txt", DiffStatus::HashMismatch)).contains("d.txt"));
         assert!(format_entry(&entry("e.txt", DiffStatus::Match)).contains("e.txt"));
+        assert!(format_entry(&entry("f.txt", DiffStatus::Scan)).contains("f.txt"));
     }
 
     #[test]
