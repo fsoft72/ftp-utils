@@ -6,6 +6,7 @@
 
 mod cli;
 mod config;
+mod output;
 
 fn main() {
     println!("ftpdiff: not yet implemented");
