@@ -5,3 +5,4 @@
 //! for the design this crate implements.
 
 pub mod diff;
+pub mod exclude;
