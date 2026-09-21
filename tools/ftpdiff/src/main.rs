@@ -5,6 +5,7 @@
 //! `docs/superpowers/specs/2026-09-21-ftp-utils-monorepo-design.md`.
 
 mod cli;
+mod config;
 
 fn main() {
     println!("ftpdiff: not yet implemented");
