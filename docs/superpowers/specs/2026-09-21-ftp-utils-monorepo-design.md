@@ -89,12 +89,15 @@ Thin binary crate providing the CLI, built with `clap`.
 | `--remote-dir <path>` | Remote directory to compare |
 | `--local-dir <path>` | Local directory to compare |
 | `--ftps` | Use FTPS (explicit AUTH TLS) instead of plain FTP |
+| `--insecure-tls` | With `--ftps`, accept any TLS certificate instead of validating it (off by default; see amendment above) |
 | `--hash` | Enable hash comparison (remote hash command, fallback to download+MD5) |
 | `--exclude <glob>` | Glob pattern to exclude from comparison (repeatable) |
 | `--csv <path>` | Also write a structured CSV report to this path |
+| `--password <password>` | FTP password (least preferred source; see amendment above) |
+| `--verbose` | Print progress diagnostics to stderr as the comparison runs |
 
-Password: `FTPDIFF_PASSWORD` environment variable (required at runtime,
-not a flag).
+Password resolution: `--password` > `FTPDIFF_PASSWORD` environment
+variable > interactive hidden-input prompt (see amendment above).
 
 ### JSON config file shape
 

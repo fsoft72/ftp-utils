@@ -19,6 +19,8 @@ pub struct JsonConfig {
     pub local_dir: Option<PathBuf>,
     pub ftps: Option<bool>,
     pub hash: Option<bool>,
+    pub insecure_tls: Option<bool>,
+    pub verbose: Option<bool>,
     #[serde(default)]
     pub exclude: Vec<String>,
 }
@@ -32,6 +34,8 @@ pub struct EffectiveConfig {
     pub local_dir: PathBuf,
     pub ftps: bool,
     pub hash: bool,
+    pub insecure_tls: bool,
+    pub verbose: bool,
     pub exclude: Vec<String>,
     pub csv: Option<PathBuf>,
 }
@@ -94,6 +98,8 @@ pub fn merge(cli: &Cli, json: &JsonConfig) -> Result<EffectiveConfig, ConfigErro
         local_dir,
         ftps: cli.ftps || json.ftps.unwrap_or(false),
         hash: cli.hash || json.hash.unwrap_or(false),
+        insecure_tls: cli.insecure_tls || json.insecure_tls.unwrap_or(false),
+        verbose: cli.verbose || json.verbose.unwrap_or(false),
         exclude,
         csv: cli.csv.clone(),
     })
@@ -172,6 +178,8 @@ mod tests {
             local_dir: None,
             ftps: false,
             hash: false,
+            insecure_tls: false,
+            verbose: false,
             exclude: Vec::new(),
             csv: None,
             password: None,
@@ -261,6 +269,23 @@ mod tests {
 
         assert!(effective.ftps); // from CLI
         assert!(effective.hash); // from JSON
+    }
+
+    #[test]
+    fn insecure_tls_and_verbose_merge_as_or() {
+        let mut cli = empty_cli();
+        cli.host = Some("h".into());
+        cli.user = Some("u".into());
+        cli.remote_dir = Some("/r".into());
+        cli.local_dir = Some(PathBuf::from("./l"));
+        cli.insecure_tls = true;
+
+        let json = JsonConfig { verbose: Some(true), ..Default::default() };
+
+        let effective = merge(&cli, &json).unwrap();
+
+        assert!(effective.insecure_tls); // from CLI
+        assert!(effective.verbose); // from JSON
     }
 
     #[test]

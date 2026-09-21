@@ -31,6 +31,13 @@ pub struct Cli {
     #[arg(long)]
     pub ftps: bool,
 
+    /// Accept any TLS certificate (expired, self-signed, hostname
+    /// mismatch) when using --ftps, instead of validating it. Only use
+    /// this for servers whose certificate you can't otherwise validate:
+    /// it removes protection against man-in-the-middle attacks.
+    #[arg(long = "insecure-tls")]
+    pub insecure_tls: bool,
+
     /// Compare files by MD5 hash in addition to size.
     #[arg(long)]
     pub hash: bool,
@@ -48,6 +55,11 @@ pub struct Cli {
     /// shell history and process listings.
     #[arg(long)]
     pub password: Option<String>,
+
+    /// Print progress diagnostics (connecting, directory walk counts,
+    /// hashing) to stderr as the comparison runs.
+    #[arg(long)]
+    pub verbose: bool,
 }
 
 #[cfg(test)]
@@ -99,5 +111,33 @@ mod tests {
         let cli = Cli::parse_from(["ftpdiff"]);
 
         assert_eq!(cli.password, None);
+    }
+
+    #[test]
+    fn parses_insecure_tls_flag() {
+        let cli = Cli::parse_from(["ftpdiff", "--insecure-tls"]);
+
+        assert!(cli.insecure_tls);
+    }
+
+    #[test]
+    fn insecure_tls_defaults_to_false() {
+        let cli = Cli::parse_from(["ftpdiff"]);
+
+        assert!(!cli.insecure_tls);
+    }
+
+    #[test]
+    fn parses_verbose_flag() {
+        let cli = Cli::parse_from(["ftpdiff", "--verbose"]);
+
+        assert!(cli.verbose);
+    }
+
+    #[test]
+    fn verbose_defaults_to_false() {
+        let cli = Cli::parse_from(["ftpdiff"]);
+
+        assert!(!cli.verbose);
     }
 }

@@ -22,19 +22,36 @@ impl SuppaFtpConnection {
     /// (`TYPE I`) transfer mode, since the FTP default of ASCII mode
     /// rewrites line endings in transit and would corrupt size/hash
     /// comparisons for any file containing `\n`.
+    ///
+    /// When `ftps` is true, `insecure_tls` controls certificate
+    /// validation: false (default) validates the server's certificate and
+    /// hostname normally; true accepts any certificate, including expired,
+    /// self-signed, or hostname-mismatched ones. Only set `insecure_tls`
+    /// for servers with certificates you can't otherwise validate (e.g.
+    /// internal self-signed setups) - it removes protection against
+    /// man-in-the-middle attacks.
     pub fn connect(
         host: &str,
         port: u16,
         user: &str,
         password: &str,
         ftps: bool,
+        insecure_tls: bool,
     ) -> Result<Self, FtpConnectionError> {
         let address = format!("{host}:{port}");
 
         if ftps {
             let stream = NativeTlsFtpStream::connect(&address)
                 .map_err(|e| FtpConnectionError(e.to_string()))?;
-            let connector = TlsConnector::new().map_err(|e| FtpConnectionError(e.to_string()))?;
+            let mut connector_builder = TlsConnector::builder();
+            if insecure_tls {
+                connector_builder
+                    .danger_accept_invalid_certs(true)
+                    .danger_accept_invalid_hostnames(true);
+            }
+            let connector = connector_builder
+                .build()
+                .map_err(|e| FtpConnectionError(e.to_string()))?;
             let mut stream = stream
                 .into_secure(NativeTlsConnector::from(connector), host)
                 .map_err(|e| FtpConnectionError(e.to_string()))?;

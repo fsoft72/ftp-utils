@@ -35,3 +35,10 @@
   documented as the least preferred option (shell history / process
   listing exposure); the env var and prompt remain the recommended ways
   to supply credentials.
+- Added `--insecure-tls`: when set with `--ftps`, accepts any TLS
+  certificate (expired, self-signed, hostname mismatch) instead of
+  validating it. Off by default; documented as removing protection
+  against man-in-the-middle attacks, for use only with servers whose
+  certificate can't otherwise be validated.
+- Added `--verbose`: prints progress diagnostics (connecting, comparison
+  start/end with entry count, CSV write) to stderr as ftpdiff runs.

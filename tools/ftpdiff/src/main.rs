@@ -48,12 +48,23 @@ fn run() -> i32 {
         }
     };
 
+    if effective.verbose {
+        eprintln!(
+            "Connecting to {}:{} as {} ({})...",
+            effective.host,
+            effective.port,
+            effective.user,
+            if effective.ftps { "FTPS" } else { "FTP" }
+        );
+    }
+
     let mut connection = match SuppaFtpConnection::connect(
         &effective.host,
         effective.port,
         &effective.user,
         &password,
         effective.ftps,
+        effective.insecure_tls,
     ) {
         Ok(c) => c,
         Err(e) => {
@@ -61,6 +72,10 @@ fn run() -> i32 {
             return 2;
         }
     };
+
+    if effective.verbose {
+        eprintln!("Connected. Comparing {} against {}...", effective.local_dir.display(), effective.remote_dir);
+    }
 
     let options = CompareOptions {
         local_dir: effective.local_dir.clone(),
@@ -79,6 +94,10 @@ fn run() -> i32 {
 
     connection.close();
 
+    if effective.verbose {
+        eprintln!("Comparison done: {} entries.", entries.len());
+    }
+
     for entry in &entries {
         println!("{}", output::format_entry(entry));
     }
@@ -86,6 +105,9 @@ fn run() -> i32 {
     println!("{}", output::format_summary(&summary));
 
     if let Some(csv_path) = &effective.csv {
+        if effective.verbose {
+            eprintln!("Writing CSV report to {}...", csv_path.display());
+        }
         if let Err(e) = csv_report::write_csv(csv_path, &entries) {
             eprintln!("Error: failed to write CSV to {}: {e}", csv_path.display());
             return 2;
