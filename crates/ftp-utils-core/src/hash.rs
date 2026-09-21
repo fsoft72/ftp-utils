@@ -1,22 +1,36 @@
 //! Upgrades `Match` diff entries to a hash-verified `Match` or
-//! `HashMismatch` by comparing MD5 hashes. Tries the connection's
-//! server-side hash first; falls back to downloading the remote file and
-//! hashing it locally if the server doesn't support that.
+//! `HashMismatch` by comparing MD5 hashes. For each side, prefers an
+//! already-known hash (e.g. recycled from a `--local-csv`/`--remote-csv`
+//! source) over live access; if a side has neither, that entry is left
+//! at its size-only `Match` result rather than erroring.
 
+use std::collections::HashMap;
 use std::path::Path;
 
 use crate::diff::{DiffEntry, DiffStatus};
 use crate::remote::FtpConnection;
 
-/// For every entry currently marked `Match`, computes and compares MD5
-/// hashes, updating `status` to `Match` or `HashMismatch` and filling in
-/// `local_md5`/`remote_md5`. Entries with any other status are untouched.
+/// For every entry currently marked `Match`, resolves and compares each
+/// side's MD5 hash, updating `status` to `Match` or `HashMismatch` (only
+/// when both sides' hashes could be resolved) and filling in whichever of
+/// `local_md5`/`remote_md5` were resolved. Entries with any other status
+/// are untouched.
+///
+/// Each side's hash is resolved in this order: `local_known_md5`/
+/// `remote_known_md5` first (an already-known hash, e.g. recycled from a
+/// CSV source); then, if that side has a live source (`conn`+
+/// `remote_root` for remote, `local_root` for local), fetched live
+/// exactly as before. If neither is available for a side, that side's
+/// hash stays unresolved and the entry's status is left unchanged.
+///
 /// Calls `progress` (if given) with a human-readable message for every
-/// entry actually hashed, for `--verbose` output.
+/// entry a hash resolution is attempted for, for `--verbose` output.
 pub fn apply_hash_comparison<C: FtpConnection>(
-    conn: &mut C,
-    remote_root: &str,
-    local_root: &Path,
+    mut conn: Option<&mut C>,
+    remote_root: Option<&str>,
+    local_root: Option<&Path>,
+    local_known_md5: &HashMap<String, String>,
+    remote_known_md5: &HashMap<String, String>,
     entries: &mut [DiffEntry],
     mut progress: Option<&mut (dyn FnMut(&str) + '_)>,
 ) -> std::io::Result<()> {
@@ -29,29 +43,38 @@ pub fn apply_hash_comparison<C: FtpConnection>(
             cb(&format!("hash: {}", entry.relative_path));
         }
 
-        let remote_path = format!("{remote_root}/{}", entry.relative_path);
-        let local_path = local_root.join(&entry.relative_path);
-
-        let remote_md5 = match conn.try_hash(&remote_path) {
-            Some(hash) => hash,
-            None => {
-                let bytes = conn
-                    .retr_to_buffer(&remote_path)
-                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
-                format!("{:x}", md5::compute(&bytes))
+        let remote_md5 = if let Some(md5) = remote_known_md5.get(&entry.relative_path) {
+            Some(md5.clone())
+        } else if let (Some(conn), Some(remote_root)) = (conn.as_deref_mut(), remote_root) {
+            let remote_path = format!("{remote_root}/{}", entry.relative_path);
+            match conn.try_hash(&remote_path) {
+                Some(hash) => Some(hash),
+                None => {
+                    let bytes = conn
+                        .retr_to_buffer(&remote_path)
+                        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+                    Some(format!("{:x}", md5::compute(&bytes)))
+                }
             }
-        };
-
-        let local_bytes = std::fs::read(&local_path)?;
-        let local_md5 = format!("{:x}", md5::compute(&local_bytes));
-
-        entry.status = if local_md5 == remote_md5 {
-            DiffStatus::Match
         } else {
-            DiffStatus::HashMismatch
+            None
         };
-        entry.local_md5 = Some(local_md5);
-        entry.remote_md5 = Some(remote_md5);
+
+        let local_md5 = if let Some(md5) = local_known_md5.get(&entry.relative_path) {
+            Some(md5.clone())
+        } else if let Some(local_root) = local_root {
+            let local_path = local_root.join(&entry.relative_path);
+            let bytes = std::fs::read(&local_path)?;
+            Some(format!("{:x}", md5::compute(&bytes)))
+        } else {
+            None
+        };
+
+        if let (Some(local_md5), Some(remote_md5)) = (&local_md5, &remote_md5) {
+            entry.status = if local_md5 == remote_md5 { DiffStatus::Match } else { DiffStatus::HashMismatch };
+        }
+        entry.local_md5 = local_md5;
+        entry.remote_md5 = remote_md5;
     }
 
     Ok(())
@@ -113,7 +136,16 @@ mod tests {
         let mut entries = vec![entry("f.txt")];
         let mut conn = MockConnection { hash: Some(expected_hash.clone()), remote_bytes: Vec::new() };
 
-        apply_hash_comparison(&mut conn, "/remote", dir.path(), &mut entries, None).unwrap();
+        apply_hash_comparison(
+            Some(&mut conn),
+            Some("/remote"),
+            Some(dir.path()),
+            &HashMap::new(),
+            &HashMap::new(),
+            &mut entries,
+            None,
+        )
+        .unwrap();
 
         assert_eq!(entries[0].status, DiffStatus::Match);
         assert_eq!(entries[0].remote_md5, Some(expected_hash));
@@ -127,7 +159,16 @@ mod tests {
         let mut entries = vec![entry("f.txt")];
         let mut conn = MockConnection { hash: None, remote_bytes: b"different".to_vec() };
 
-        apply_hash_comparison(&mut conn, "/remote", dir.path(), &mut entries, None).unwrap();
+        apply_hash_comparison(
+            Some(&mut conn),
+            Some("/remote"),
+            Some(dir.path()),
+            &HashMap::new(),
+            &HashMap::new(),
+            &mut entries,
+            None,
+        )
+        .unwrap();
 
         assert_eq!(entries[0].status, DiffStatus::HashMismatch);
     }
@@ -145,7 +186,16 @@ mod tests {
         }];
         let mut conn = MockConnection { hash: None, remote_bytes: Vec::new() };
 
-        apply_hash_comparison(&mut conn, "/remote", dir.path(), &mut entries, None).unwrap();
+        apply_hash_comparison(
+            Some(&mut conn),
+            Some("/remote"),
+            Some(dir.path()),
+            &HashMap::new(),
+            &HashMap::new(),
+            &mut entries,
+            None,
+        )
+        .unwrap();
 
         assert_eq!(entries[0].status, DiffStatus::LocalOnly);
         assert_eq!(entries[0].remote_md5, None);
@@ -172,8 +222,55 @@ mod tests {
         let mut messages = Vec::new();
         let mut progress = |msg: &str| messages.push(msg.to_string());
 
-        apply_hash_comparison(&mut conn, "/remote", dir.path(), &mut entries, Some(&mut progress)).unwrap();
+        apply_hash_comparison(
+            Some(&mut conn),
+            Some("/remote"),
+            Some(dir.path()),
+            &HashMap::new(),
+            &HashMap::new(),
+            &mut entries,
+            Some(&mut progress),
+        )
+        .unwrap();
 
         assert_eq!(messages, vec!["hash: f.txt".to_string()]);
+    }
+
+    #[test]
+    fn known_md5_short_circuits_live_access() {
+        // No live connection or local file backing this entry at all -
+        // both known-md5 maps must be consulted first.
+        let mut entries = vec![entry("f.txt")];
+        let mut local_known = HashMap::new();
+        local_known.insert("f.txt".to_string(), "same-hash".to_string());
+        let mut remote_known = HashMap::new();
+        remote_known.insert("f.txt".to_string(), "same-hash".to_string());
+
+        apply_hash_comparison::<MockConnection>(None, None, None, &local_known, &remote_known, &mut entries, None)
+            .unwrap();
+
+        assert_eq!(entries[0].status, DiffStatus::Match);
+        assert_eq!(entries[0].local_md5, Some("same-hash".to_string()));
+        assert_eq!(entries[0].remote_md5, Some("same-hash".to_string()));
+    }
+
+    #[test]
+    fn leaves_entry_at_match_when_hash_unresolvable_on_either_side() {
+        let mut entries = vec![entry("f.txt")];
+
+        apply_hash_comparison::<MockConnection>(
+            None,
+            None,
+            None,
+            &HashMap::new(),
+            &HashMap::new(),
+            &mut entries,
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(entries[0].status, DiffStatus::Match);
+        assert_eq!(entries[0].local_md5, None);
+        assert_eq!(entries[0].remote_md5, None);
     }
 }

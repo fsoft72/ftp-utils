@@ -72,7 +72,15 @@ pub fn compare<C: FtpConnection>(
     let mut entries = compare::compare_entries(&local_entries, &remote_entries);
 
     if opts.hash {
-        hash::apply_hash_comparison(conn, &opts.remote_dir, &opts.local_dir, &mut entries, progress.as_deref_mut())?;
+        hash::apply_hash_comparison(
+            Some(conn),
+            Some(opts.remote_dir.as_str()),
+            Some(opts.local_dir.as_path()),
+            &std::collections::HashMap::new(),
+            &std::collections::HashMap::new(),
+            &mut entries,
+            progress.as_deref_mut(),
+        )?;
     }
 
     Ok(entries)
