@@ -13,6 +13,7 @@ serde_json.workspace = true
 csv.workspace = true
 colored.workspace = true
 rpassword.workspace = true
+md5.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

@@ -33,14 +33,17 @@ override the JSON file, which overrides built-in defaults.
 | `--verbose` | Print progress diagnostics to stderr as the comparison runs, including each file as it's checked |
 | `--local-csv <path>` | Read the local side from a previous `ftpdiff --csv` report instead of scanning `--local-dir` |
 | `--remote-csv <path>` | Read the remote side from a previous `ftpdiff --csv` report instead of connecting to the FTP server |
+| `--build` | Scan exactly one side and write it to `--csv` without comparing; requires `--csv`, cannot combine with `--local-csv`/`--remote-csv` |
 | `-h`, `--help` | Print help |
 
 `host`, `user`, and `remote-dir` are required unless `--remote-csv` is
 given; `local-dir` is required unless `--local-csv` is given. ftpdiff
-exits with an error (code `2`) if a required setting is missing, or if
-`--local-dir`/`--local-csv` or their remote equivalents are both given at
-once (they're mutually exclusive). See "Comparing against a CSV
-snapshot" below.
+exits with an error (code `2`) if a required setting is missing. If
+`--local-dir`/`--local-csv` (or the remote equivalents) are both given,
+the CSV flag takes precedence and the live setting is simply unused - not
+an error, so a shared `--config` file can supply connection defaults used
+by other invocations without breaking a CSV-sourced one. See "Comparing
+against a CSV snapshot" below.
 
 ## Password
 
@@ -95,6 +98,23 @@ recomputed; if it's missing (e.g. the original report wasn't generated
 with `--hash`) and that side has no live source to fall back to, that
 entry is left at its size-only `Match` result rather than erroring.
 
+### Building a snapshot without comparing (`--build`)
+
+`--build` scans exactly one side and writes it to `--csv`, skipping the
+comparison entirely - the producer counterpart to `--local-csv`/
+`--remote-csv`. Every entry gets status `Scan` rather than
+`LocalOnly`/`RemoteOnly` (nothing was compared, so those labels don't
+apply), but the CSV is still a fully valid `--local-csv`/`--remote-csv`
+input for a later run - the reader only looks at whether a row has a
+size for that side, not its status text.
+
+Requires `--csv`; requires exactly one side's live settings (`--local-dir`
+alone, or `--host`/`--user`/`--remote-dir` alone - not both, not
+neither); cannot be combined with `--local-csv`/`--remote-csv`. With
+`--hash`, each scanned file's own MD5 is computed and recorded (off by
+default, since it's the slow path). Exit code is always `0` or `2`,
+never `1` - nothing was compared, so "differences found" doesn't apply.
+
 ## Output
 
 Always printed to stdout, one colored line per file:
@@ -103,6 +123,7 @@ Always printed to stdout, one colored line per file:
 - `-` (red) - remote-only
 - `~` (yellow) - size mismatch or hash mismatch
 - `=` (dim) - match
+- `*` (cyan) - scanned by `--build`, not compared (status `Scan`)
 
 followed by a summary line with counts per status.
 
@@ -133,20 +154,25 @@ set) a note before writing the report.
 
 ### Scan a remote directory and generate a CSV report
 
-A normal comparison run with `--csv` doubles as "scan the remote
-directory and record the result": the remote side is always scanned live
-unless `--remote-csv` is given, and `--csv` writes every entry (both
-sides) to a file:
+`--build` scans one side only and writes it straight to `--csv`, with no
+local directory needed at all:
 
 ```sh
 ftpdiff --host ftp.example.com --user myuser \
-  --remote-dir /var/www/site --local-dir ./site \
-  --csv report.csv
+  --remote-dir /var/www/site --build --csv report.csv
+```
+
+Add `--hash` to also record each file's MD5 in the snapshot:
+
+```sh
+ftpdiff --host ftp.example.com --user myuser \
+  --remote-dir /var/www/site --build --hash --csv report.csv
 ```
 
 `report.csv` now holds a full snapshot of the remote scan (its
-`remote_size`/`remote_md5` columns), which can later be reused as a
-`--remote-csv` input - see the third example below.
+`remote_size`/`remote_md5` columns; `status` is `Scan` for every row),
+which can later be reused as a `--remote-csv` input - see the third
+example below.
 
 ### Compare a local directory against a remote directory
 
