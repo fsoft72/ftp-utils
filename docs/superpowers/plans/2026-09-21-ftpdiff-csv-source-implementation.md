@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add `--local-csv <path>` and `--remote-csv <path>` to `ftpdiff`, letting either side of the comparison come from a previously-written `ftpdiff --csv` report instead of a live filesystem scan / FTP connection, independently.
+**Goal:** Add `--local-csv <path>` and `--remote-csv <path>` to `ftpdiff`, letting either side of the comparison come from a previously-written `ftpdiff --csv` report instead of a live filesystem scan / FTP connection, independently. Also add `--build`, the producer counterpart: scan exactly one live side and write it to `--csv` without comparing, for later use as a `--local-csv`/`--remote-csv` input.
 
-**Architecture:** `ftp-utils-core` gains a `csv_source` module that reads an existing CSV report and reconstructs one side's `LocalEntry`/`RemoteEntry` list plus a side-channel map of already-known MD5 hashes. `hash::apply_hash_comparison`'s signature becomes more permissive (`conn`/`local_root` become `Option`, plus the two known-MD5 maps), preferring a known hash over live access and gracefully leaving an entry unresolved (not erroring) when neither is available. `connection::merge_connection` (used as-is by `ftpops`) stays unchanged; a new `merge_connection_partial` is extracted from it (used internally, and directly by `ftpdiff` for its conditional requirements). `ftpdiff`'s `EffectiveConfig` gains `LocalSource`/`RemoteSource` enums describing where each side comes from, and `main.rs`'s orchestration branches on them instead of always calling the (now effectively legacy, still-present-for-compatibility) `ftp_utils_core::compare()` wrapper.
+**Architecture:** `ftp-utils-core` gains a `csv_source` module that reads an existing CSV report and reconstructs one side's `LocalEntry`/`RemoteEntry` list plus a side-channel map of already-known MD5 hashes. `hash::apply_hash_comparison`'s signature becomes more permissive (`conn`/`local_root` become `Option`, plus the two known-MD5 maps), preferring a known hash over live access and gracefully leaving an entry unresolved (not erroring) when neither is available. `connection::merge_connection` (used as-is by `ftpops`) stays unchanged; a new `merge_connection_partial` is extracted from it (used internally, and directly by `ftpdiff` for its conditional requirements). `ftpdiff`'s `EffectiveConfig` gains `LocalSource`/`RemoteSource` enums describing where each side comes from, and `main.rs`'s orchestration branches on them instead of always calling the (now effectively legacy, still-present-for-compatibility) `ftp_utils_core::compare()` wrapper. `DiffStatus` gains a `Scan` variant for build-mode entries (scanned, not compared), and a separate `run_build` path in `main.rs` scans one side, optionally hashes each file directly, and writes the CSV without ever calling `compare_entries`.
 
 **Tech Stack:** Rust 2021, existing workspace dependencies only (`csv`, `md5`, `clap`, `serde`).
 
@@ -17,6 +17,7 @@
 - `--local-csv`/`--remote-csv` are CLI-only, not JSON config fields (matches `ftpops`'s own `--csv` precedent).
 - `--exclude` applies to CSV-sourced entries the same way it applies to live-scanned ones.
 - With `--hash`, a side's already-known MD5 (recycled from its CSV source) is preferred over live computation; if unavailable on a side with no live fallback, that entry's hash stays unresolved (status stays `Match`, no error).
+- `--build` requires `--csv`, cannot be combined with `--local-csv`/`--remote-csv`, and requires exactly one live side (`--local-dir` alone, or `--host`/`--user`/`--remote-dir` alone) - zero or two sides is an error. Build-mode entries get `DiffStatus::Scan`; `--hash` computes each entry's own MD5 directly (not conditional on a match, since nothing is being matched). Exit code is always `0` or `2`, never `1`.
 
 ---
 
@@ -28,14 +29,18 @@ crates/ftp-utils-core/
     ├── lib.rs           # add `pub mod csv_source;`
     ├── connection.rs      # add PartialConnection + merge_connection_partial
     ├── csv_source.rs       # NEW: read_local_entries, read_remote_entries
-    └── hash.rs               # apply_hash_comparison: conn/local_root -> Option,
-                                # + two known-md5 map params
+    ├── diff.rs               # add DiffStatus::Scan
+    └── hash.rs                 # apply_hash_comparison: conn/local_root -> Option,
+                                  # + two known-md5 map params
 
 tools/ftpdiff/
 └── src/
-    ├── cli.rs           # + local_csv, remote_csv fields
-    ├── config.rs          # LocalSource, RemoteSource, restructured EffectiveConfig/merge()
-    └── main.rs              # orchestration branches on LocalSource/RemoteSource
+    ├── cli.rs           # + local_csv, remote_csv, build fields
+    ├── config.rs          # LocalSource, RemoteSource, restructured EffectiveConfig/merge();
+    │                        # + BuildSide, BuildConfig, merge_build()
+    ├── output.rs            # format_entry/summarize: add Scan arm
+    └── main.rs                # orchestration branches on LocalSource/RemoteSource;
+                                 # + run_build()
 ```
 
 ---
@@ -1494,7 +1499,749 @@ git commit -m "ftpdiff: orchestrate comparison from LocalSource/RemoteSource"
 
 ---
 
-### Task 8: Spec amendment, CHANGES.md, final verification
+### Task 8: `DiffStatus::Scan` and `output.rs` handling
+
+**Files:**
+- Modify: `crates/ftp-utils-core/src/diff.rs`
+- Modify: `tools/ftpdiff/src/output.rs`
+
+**Interfaces:**
+- Produces (added variant): `DiffStatus::Scan` - "this entry was scanned by `--build`, not compared against the other side."
+
+- [ ] **Step 1: Add the variant**
+
+In `crates/ftp-utils-core/src/diff.rs`, replace:
+
+```rust
+/// Outcome of comparing one relative path present locally and/or remotely.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DiffStatus {
+    /// File exists locally but not on the remote server.
+    LocalOnly,
+    /// File exists on the remote server but not locally.
+    RemoteOnly,
+    /// File exists on both sides but sizes differ.
+    SizeMismatch,
+    /// Sizes match but content hashes differ (only when hashing is enabled).
+    HashMismatch,
+    /// File matches on both sides.
+    Match,
+}
+```
+
+with:
+
+```rust
+/// Outcome of comparing one relative path present locally and/or remotely.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DiffStatus {
+    /// File exists locally but not on the remote server.
+    LocalOnly,
+    /// File exists on the remote server but not locally.
+    RemoteOnly,
+    /// File exists on both sides but sizes differ.
+    SizeMismatch,
+    /// Sizes match but content hashes differ (only when hashing is enabled).
+    HashMismatch,
+    /// File matches on both sides.
+    Match,
+    /// Scanned by `--build`, not compared against the other side (that
+    /// side wasn't scanned at all).
+    Scan,
+}
+```
+
+`compare_entries` never produces `Scan` (it's only ever constructed by
+`--build` mode in `tools/ftpdiff`), so no change is needed in
+`compare.rs` - but any exhaustive `match` on `DiffStatus` elsewhere in
+the workspace now needs a `Scan` arm to keep compiling, which is exactly
+`tools/ftpdiff/src/output.rs`'s `format_entry` and `summarize`.
+
+- [ ] **Step 2: Run the crate build to find the now-missing match arms**
+
+Run: `cargo build --workspace 2>&1 | grep -A3 "non-exhaustive"`
+Expected: two errors, both in `tools/ftpdiff/src/output.rs` (`format_entry`
+and `summarize`)
+
+- [ ] **Step 3: Add the `Scan` arms**
+
+In `tools/ftpdiff/src/output.rs`, replace `format_entry`:
+
+```rust
+pub fn format_entry(entry: &DiffEntry) -> String {
+    match entry.status {
+        DiffStatus::LocalOnly => format!("{} {}", "+".green(), entry.relative_path),
+        DiffStatus::RemoteOnly => format!("{} {}", "-".red(), entry.relative_path),
+        DiffStatus::SizeMismatch => format!(
+            "{} {} (local={:?}, remote={:?})",
+            "~".yellow(),
+            entry.relative_path,
+            entry.local_size,
+            entry.remote_size
+        ),
+        DiffStatus::HashMismatch => format!("{} {} (hash differs)", "~".yellow(), entry.relative_path),
+        DiffStatus::Match => format!("{} {}", "=".dimmed(), entry.relative_path),
+        DiffStatus::Scan => format!("{} {}", "*".cyan(), entry.relative_path),
+    }
+}
+```
+
+and `summarize`:
+
+```rust
+pub fn summarize(entries: &[DiffEntry]) -> Summary {
+    let mut summary = Summary { local_only: 0, remote_only: 0, size_mismatch: 0, hash_mismatch: 0, matched: 0 };
+    for entry in entries {
+        match entry.status {
+            DiffStatus::LocalOnly => summary.local_only += 1,
+            DiffStatus::RemoteOnly => summary.remote_only += 1,
+            DiffStatus::SizeMismatch => summary.size_mismatch += 1,
+            DiffStatus::HashMismatch => summary.hash_mismatch += 1,
+            DiffStatus::Match => summary.matched += 1,
+            // Never produced by compare_entries; --build mode has its own
+            // "Scanned N entries." line instead of this summary.
+            DiffStatus::Scan => {}
+        }
+    }
+    summary
+}
+```
+
+- [ ] **Step 4: Add a test for the new `format_entry` arm**
+
+In `tools/ftpdiff/src/output.rs`'s `tests` module, extend
+`formats_each_status_with_the_relative_path`:
+
+```rust
+    #[test]
+    fn formats_each_status_with_the_relative_path() {
+        colored::control::set_override(false);
+
+        assert!(format_entry(&entry("a.txt", DiffStatus::LocalOnly)).contains("a.txt"));
+        assert!(format_entry(&entry("b.txt", DiffStatus::RemoteOnly)).contains("b.txt"));
+        assert!(format_entry(&entry("c.txt", DiffStatus::SizeMismatch)).contains("c.txt"));
+        assert!(format_entry(&entry("d.txt", DiffStatus::HashMismatch)).contains("d.txt"));
+        assert!(format_entry(&entry("e.txt", DiffStatus::Match)).contains("e.txt"));
+        assert!(format_entry(&entry("f.txt", DiffStatus::Scan)).contains("f.txt"));
+    }
+```
+
+- [ ] **Step 5: Run tests**
+
+Run: `cargo test -p ftp-utils-core diff:: && cargo test -p ftpdiff output::tests`
+Expected: PASS
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add crates/ftp-utils-core/src/diff.rs tools/ftpdiff/src/output.rs
+git commit -m "ftp-utils-core: add DiffStatus::Scan for --build mode entries"
+```
+
+---
+
+### Task 9: ftpdiff `--build` flag and config resolution
+
+**Files:**
+- Modify: `tools/ftpdiff/src/cli.rs`
+- Modify: `tools/ftpdiff/src/config.rs`
+
+**Interfaces:**
+- Produces (added to `Cli`): `pub build: bool`
+- Produces (in `config.rs`): `pub enum BuildSide { Local(PathBuf), Remote { host: String, port: u16, user: String, remote_dir: String, ftps: bool, insecure_tls: bool } }` (derives `Debug`, `Clone`), `pub struct BuildConfig { pub side: BuildSide, pub hash: bool, pub exclude: Vec<String>, pub csv: PathBuf, pub verbose: bool }` (derives `Debug`, `Clone`), `pub fn merge_build(cli: &Cli, json: &JsonConfig) -> Result<BuildConfig, ConfigError>`
+
+- [ ] **Step 1: Add the `--build` flag**
+
+In `tools/ftpdiff/src/cli.rs`, add to `Cli` (after `remote_csv`, before the
+closing `}`):
+
+```rust
+    /// Read the remote side from a previous `ftpdiff --csv` report
+    /// instead of connecting to the FTP server.
+    #[arg(long = "remote-csv")]
+    pub remote_csv: Option<PathBuf>,
+
+    /// Scan exactly one side (--local-dir, or --host/--user/--remote-dir)
+    /// and write it to --csv without comparing. Cannot be combined with
+    /// --local-csv/--remote-csv.
+    #[arg(long)]
+    pub build: bool,
+}
+```
+
+Add a test to the `tests` module:
+
+```rust
+    #[test]
+    fn build_flag_defaults_to_false() {
+        let cli = Cli::parse_from(["ftpdiff"]);
+
+        assert!(!cli.build);
+    }
+
+    #[test]
+    fn parses_build_flag() {
+        let cli = Cli::parse_from(["ftpdiff", "--build"]);
+
+        assert!(cli.build);
+    }
+```
+
+- [ ] **Step 2: Run the CLI tests**
+
+Run: `cargo test -p ftpdiff cli::tests`
+Expected: PASS (13 tests) - additive struct field, no red phase needed
+
+- [ ] **Step 3: Write the failing config test**
+
+In `tools/ftpdiff/src/config.rs`, add after the `EffectiveConfig` struct:
+
+```rust
+/// Which side `--build` scans.
+#[derive(Debug, Clone)]
+pub enum BuildSide {
+    Local(PathBuf),
+    Remote { host: String, port: u16, user: String, remote_dir: String, ftps: bool, insecure_tls: bool },
+}
+
+/// Resolved settings for a `--build` run.
+#[derive(Debug, Clone)]
+pub struct BuildConfig {
+    pub side: BuildSide,
+    pub hash: bool,
+    pub exclude: Vec<String>,
+    pub csv: PathBuf,
+    pub verbose: bool,
+}
+
+/// Resolves a `--build` run's settings. Requires `--csv`; rejects
+/// `--local-csv`/`--remote-csv` (build mode produces a CSV, it doesn't
+/// consume one); requires exactly one live side.
+pub fn merge_build(cli: &Cli, json: &JsonConfig) -> Result<BuildConfig, ConfigError> {
+    todo!()
+}
+```
+
+Add tests to the `tests` module:
+
+```rust
+    #[test]
+    fn build_requires_csv() {
+        let mut cli = empty_cli();
+        cli.build = true;
+        cli.connection.local_dir = Some(PathBuf::from("./l"));
+
+        let result = merge_build(&cli, &JsonConfig::default());
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn build_rejects_local_csv() {
+        let mut cli = empty_cli();
+        cli.build = true;
+        cli.csv = Some(PathBuf::from("out.csv"));
+        cli.connection.local_dir = Some(PathBuf::from("./l"));
+        cli.local_csv = Some(PathBuf::from("in.csv"));
+
+        let result = merge_build(&cli, &JsonConfig::default());
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn build_rejects_remote_csv() {
+        let mut cli = empty_cli();
+        cli.build = true;
+        cli.csv = Some(PathBuf::from("out.csv"));
+        cli.connection.local_dir = Some(PathBuf::from("./l"));
+        cli.remote_csv = Some(PathBuf::from("in.csv"));
+
+        let result = merge_build(&cli, &JsonConfig::default());
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn build_resolves_local_side_alone() {
+        let mut cli = empty_cli();
+        cli.build = true;
+        cli.csv = Some(PathBuf::from("out.csv"));
+        cli.connection.local_dir = Some(PathBuf::from("./l"));
+
+        let build = merge_build(&cli, &JsonConfig::default()).unwrap();
+
+        assert!(matches!(build.side, BuildSide::Local(ref p) if p == &PathBuf::from("./l")));
+    }
+
+    #[test]
+    fn build_resolves_remote_side_alone() {
+        let mut cli = empty_cli();
+        cli.build = true;
+        cli.csv = Some(PathBuf::from("out.csv"));
+        cli.connection.host = Some("h".into());
+        cli.connection.user = Some("u".into());
+        cli.connection.remote_dir = Some("/r".into());
+
+        let build = merge_build(&cli, &JsonConfig::default()).unwrap();
+
+        assert!(matches!(build.side, BuildSide::Remote { ref host, .. } if host == "h"));
+    }
+
+    #[test]
+    fn build_errors_when_both_sides_given() {
+        let mut cli = empty_cli();
+        cli.build = true;
+        cli.csv = Some(PathBuf::from("out.csv"));
+        cli.connection.local_dir = Some(PathBuf::from("./l"));
+        cli.connection.host = Some("h".into());
+        cli.connection.user = Some("u".into());
+        cli.connection.remote_dir = Some("/r".into());
+
+        let result = merge_build(&cli, &JsonConfig::default());
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn build_errors_when_neither_side_given() {
+        let mut cli = empty_cli();
+        cli.build = true;
+        cli.csv = Some(PathBuf::from("out.csv"));
+
+        let result = merge_build(&cli, &JsonConfig::default());
+
+        assert!(result.is_err());
+    }
+```
+
+- [ ] **Step 4: Run tests to verify they fail**
+
+Run: `cargo test -p ftpdiff config::tests::build`
+Expected: FAIL (`not yet implemented`)
+
+- [ ] **Step 5: Implement**
+
+Replace the `todo!()`:
+
+```rust
+pub fn merge_build(cli: &Cli, json: &JsonConfig) -> Result<BuildConfig, ConfigError> {
+    let csv = cli
+        .csv
+        .clone()
+        .ok_or_else(|| ConfigError("--build requires --csv".to_string()))?;
+
+    if cli.local_csv.is_some() || cli.remote_csv.is_some() {
+        return Err(ConfigError(
+            "--build cannot be combined with --local-csv/--remote-csv".to_string(),
+        ));
+    }
+
+    let partial = connection::merge_connection_partial(&cli.connection, &json.connection);
+    let has_local = partial.local_dir.is_some();
+    let has_remote = partial.host.is_some() || partial.user.is_some() || partial.remote_dir.is_some();
+
+    if has_local && has_remote {
+        return Err(ConfigError(
+            "--build takes exactly one side: specify --local-dir, or --host/--user/--remote-dir, not both"
+                .to_string(),
+        ));
+    }
+
+    let side = if has_local {
+        BuildSide::Local(partial.local_dir.unwrap())
+    } else if has_remote {
+        let host = partial
+            .host
+            .ok_or_else(|| ConfigError("missing required setting: host for --build".to_string()))?;
+        let user = partial
+            .user
+            .ok_or_else(|| ConfigError("missing required setting: user for --build".to_string()))?;
+        let remote_dir = partial
+            .remote_dir
+            .ok_or_else(|| ConfigError("missing required setting: remote-dir for --build".to_string()))?;
+        BuildSide::Remote {
+            host,
+            port: partial.port,
+            user,
+            remote_dir,
+            ftps: partial.ftps,
+            insecure_tls: partial.insecure_tls,
+        }
+    } else {
+        return Err(ConfigError(
+            "--build requires --local-dir, or --host/--user/--remote-dir".to_string(),
+        ));
+    };
+
+    let mut exclude = json.exclude.clone();
+    exclude.extend(cli.exclude.clone());
+
+    Ok(BuildConfig {
+        side,
+        hash: cli.hash || json.hash.unwrap_or(false),
+        exclude,
+        csv,
+        verbose: cli.verbose || json.verbose.unwrap_or(false),
+    })
+}
+```
+
+Also update `empty_cli()` in the `tests` module to include the new
+`build` field (added in Task 5... wait, `build` was added to `Cli` in
+Task 9 Step 1 above, in the same file's struct - update the test helper
+now):
+
+```rust
+    fn empty_cli() -> Cli {
+        Cli {
+            connection: ftp_utils_core::connection::ConnectionArgs {
+                config: None,
+                host: None,
+                port: None,
+                user: None,
+                remote_dir: None,
+                local_dir: None,
+                ftps: false,
+                insecure_tls: false,
+                password: None,
+            },
+            hash: false,
+            exclude: Vec::new(),
+            csv: None,
+            verbose: false,
+            local_csv: None,
+            remote_csv: None,
+            build: false,
+        }
+    }
+```
+
+- [ ] **Step 6: Run tests to verify they pass**
+
+Run: `cargo test -p ftpdiff config::tests`
+Expected: PASS (19 tests: 12 from Task 6 + 7 new)
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add tools/ftpdiff/src/cli.rs tools/ftpdiff/src/config.rs
+git commit -m "ftpdiff: add --build flag and BuildSide/BuildConfig resolution"
+```
+
+---
+
+### Task 10: ftpdiff `main.rs` build mode wiring, docs, manual smoke test
+
+**Files:**
+- Modify: `tools/ftpdiff/src/main.rs`
+- Modify: `docs/ftpdiff.md`
+
+**Interfaces:**
+- Consumes: `config::{BuildSide, BuildConfig, merge_build}` (Task 9), `DiffStatus::Scan` (Task 8)
+
+No new automated test (wiring, same pattern as the rest of `main.rs`).
+Verified by the full workspace test suite plus a manual smoke test.
+
+- [ ] **Step 1: Add `run_build` and branch on `cli.build` in `run()`**
+
+In `tools/ftpdiff/src/main.rs`, change the top of `run()`:
+
+```rust
+fn run() -> i32 {
+    let cli = Cli::parse();
+
+    let json_config = match &cli.connection.config {
+        Some(path) => match config::load_json_config(path) {
+            Ok(loaded) => loaded,
+            Err(e) => {
+                eprintln!("Error: {e}");
+                return 2;
+            }
+        },
+        None => config::JsonConfig::default(),
+    };
+
+    if cli.build {
+        return run_build(&cli, &json_config);
+    }
+
+    let effective = match config::merge(&cli, &json_config) {
+```
+
+(the rest of `run()` after `let effective = ...` is unchanged)
+
+Then add `run_build` as a new function, after `run()`:
+
+```rust
+fn run_build(cli: &Cli, json_config: &config::JsonConfig) -> i32 {
+    let build = match config::merge_build(cli, json_config) {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("Error: {e}");
+            return 2;
+        }
+    };
+
+    let mut progress: Option<Box<dyn FnMut(&str)>> = if build.verbose {
+        Some(Box::new(|msg: &str| eprintln!("Checking {msg}")))
+    } else {
+        None
+    };
+
+    let entries: Vec<ftp_utils_core::DiffEntry> = match &build.side {
+        config::BuildSide::Local(dir) => {
+            let scanned = match local::walk_local_dir(dir, &build.exclude, progress.as_deref_mut()) {
+                Ok(e) => e,
+                Err(e) => {
+                    eprintln!("Error: {e}");
+                    return 2;
+                }
+            };
+
+            let mut out = Vec::new();
+            for item in scanned {
+                let local_md5 = if build.hash {
+                    let bytes = match std::fs::read(dir.join(&item.relative_path)) {
+                        Ok(b) => b,
+                        Err(err) => {
+                            eprintln!("Error: failed to read {} for hashing: {err}", item.relative_path);
+                            return 2;
+                        }
+                    };
+                    Some(format!("{:x}", md5::compute(&bytes)))
+                } else {
+                    None
+                };
+
+                out.push(ftp_utils_core::DiffEntry {
+                    relative_path: item.relative_path,
+                    status: ftp_utils_core::DiffStatus::Scan,
+                    local_size: Some(item.size),
+                    remote_size: None,
+                    local_md5,
+                    remote_md5: None,
+                });
+            }
+            out
+        }
+        config::BuildSide::Remote { host, port, user, remote_dir, ftps, insecure_tls } => {
+            let password = match config::read_password(cli.connection.password.as_deref()) {
+                Ok(p) => p,
+                Err(e) => {
+                    eprintln!("Error: {e}");
+                    return 2;
+                }
+            };
+
+            if build.verbose {
+                eprintln!("Connecting to {host}:{port} as {user} ({})...", if *ftps { "FTPS" } else { "FTP" });
+            }
+
+            let mut conn = match SuppaFtpConnection::connect(host, *port, user, &password, *ftps, *insecure_tls) {
+                Ok(c) => c,
+                Err(e) => {
+                    eprintln!("Error: failed to connect to {host}:{port}: {e}");
+                    return 2;
+                }
+            };
+
+            let scanned = match remote::walk_remote(&mut conn, remote_dir, &build.exclude, progress.as_deref_mut()) {
+                Ok(e) => e,
+                Err(e) => {
+                    eprintln!("Error: {e}");
+                    return 2;
+                }
+            };
+
+            let mut out = Vec::new();
+            for item in scanned {
+                let remote_md5 = if build.hash {
+                    let remote_path = format!("{remote_dir}/{}", item.relative_path);
+                    match conn.try_hash(&remote_path) {
+                        Some(hash) => Some(hash),
+                        None => match conn.retr_to_buffer(&remote_path) {
+                            Ok(bytes) => Some(format!("{:x}", md5::compute(&bytes))),
+                            Err(err) => {
+                                eprintln!("Error: failed to download {} for hashing: {err}", item.relative_path);
+                                return 2;
+                            }
+                        },
+                    }
+                } else {
+                    None
+                };
+
+                out.push(ftp_utils_core::DiffEntry {
+                    relative_path: item.relative_path,
+                    status: ftp_utils_core::DiffStatus::Scan,
+                    local_size: None,
+                    remote_size: Some(item.size),
+                    local_md5: None,
+                    remote_md5,
+                });
+            }
+
+            conn.close();
+            out
+        }
+    };
+
+    for entry in &entries {
+        println!("{}", output::format_entry(entry));
+    }
+    println!("Scanned {} entries.", entries.len());
+
+    if let Err(e) = csv_report::write_csv(&build.csv, &entries) {
+        eprintln!("Error: failed to write CSV to {}: {e}", build.csv.display());
+        return 2;
+    }
+
+    0
+}
+```
+
+- [ ] **Step 2: Run the full workspace test suite**
+
+Run: `cargo test --workspace`
+Expected: PASS - every test from Tasks 1-9
+
+- [ ] **Step 3: Build and manually smoke-test `--build`**
+
+Run: `cargo build --workspace`
+Expected: builds cleanly, no warnings
+
+```sh
+mkdir -p /tmp/ftpdiff-build-smoke/local
+printf hello > /tmp/ftpdiff-build-smoke/local/a.txt
+printf world > /tmp/ftpdiff-build-smoke/local/b.txt
+```
+
+Build a local snapshot with hashes:
+```sh
+cargo run -p ftpdiff -- --local-dir /tmp/ftpdiff-build-smoke/local --build --hash --csv /tmp/ftpdiff-build-smoke/snapshot.csv
+```
+Expected: two `*`-marked lines (`a.txt`, `b.txt`), `Scanned 2 entries.`,
+exit code `0`; `snapshot.csv` has `status` column `Scan` for both rows,
+`local_size`/`local_md5` populated, `remote_size`/`remote_md5` empty
+
+Round-trip it back in as a `--local-csv` source:
+```sh
+cargo run -p ftpdiff -- --local-csv /tmp/ftpdiff-build-smoke/snapshot.csv --remote-csv /tmp/ftpdiff-build-smoke/snapshot.csv --hash
+```
+Expected: both files report `Match` (comparing the snapshot against
+itself, using the recycled MD5s on both sides), exit code `0` - confirms
+`--build`'s output is valid `csv_source` input regardless of its `Scan`
+status text
+
+Error paths:
+```sh
+cargo run -p ftpdiff -- --local-dir /tmp/ftpdiff-build-smoke/local --build
+```
+Expected: `Error: --build requires --csv`, exit code `2`
+
+```sh
+cargo run -p ftpdiff -- --local-dir /tmp/ftpdiff-build-smoke/local --host h --user u --remote-dir /r --build --csv out.csv
+```
+Expected: `Error: --build takes exactly one side...`, exit code `2`
+
+- [ ] **Step 4: Clean up the smoke-test files**
+
+Remove `/tmp/ftpdiff-build-smoke` (or leave it - outside the repo, harmless).
+
+- [ ] **Step 5: Update `docs/ftpdiff.md`**
+
+Add `--build` to the flags table (after `--remote-csv`):
+
+```markdown
+| `--build` | Scan exactly one side (`--local-dir`, or `--host`/`--user`/`--remote-dir`) and write it to `--csv` without comparing; requires `--csv`, cannot combine with `--local-csv`/`--remote-csv` |
+```
+
+Add a subsection after "Comparing against a CSV snapshot" (before `##
+Output`):
+
+```markdown
+### Building a snapshot without comparing (`--build`)
+
+`--build` scans exactly one side and writes it to `--csv`, skipping the
+comparison entirely - the producer counterpart to `--local-csv`/
+`--remote-csv`. Every entry gets status `Scan` rather than
+`LocalOnly`/`RemoteOnly` (nothing was compared, so those labels don't
+apply), but the CSV is still a fully valid `--local-csv`/`--remote-csv`
+input for a later run - the reader only looks at whether a row has a
+size for that side, not its status text.
+
+Requires `--csv`; requires exactly one side's live settings (`--local-dir`
+alone, or `--host`/`--user`/`--remote-dir` alone - not both, not
+neither); cannot be combined with `--local-csv`/`--remote-csv`. With
+`--hash`, each scanned file's own MD5 is computed and recorded (off by
+default, since it's the slow path). Exit code is always `0` or `2`,
+never `1` - nothing was compared, so "differences found" doesn't apply.
+```
+
+Update the first Example ("Scan a remote directory and generate a CSV
+report") to use `--build` instead of a full comparison, since that's now
+the more direct way to do exactly that - replace:
+
+```markdown
+### Scan a remote directory and generate a CSV report
+
+A normal comparison run with `--csv` doubles as "scan the remote
+directory and record the result": the remote side is always scanned live
+unless `--remote-csv` is given, and `--csv` writes every entry (both
+sides) to a file:
+
+\`\`\`sh
+ftpdiff --host ftp.example.com --user myuser \
+  --remote-dir /var/www/site --local-dir ./site \
+  --csv report.csv
+\`\`\`
+
+`report.csv` now holds a full snapshot of the remote scan (its
+`remote_size`/`remote_md5` columns), which can later be reused as a
+`--remote-csv` input - see the third example below.
+```
+
+with:
+
+```markdown
+### Scan a remote directory and generate a CSV report
+
+`--build` scans one side only and writes it straight to `--csv`, with no
+local directory needed at all:
+
+\`\`\`sh
+ftpdiff --host ftp.example.com --user myuser \
+  --remote-dir /var/www/site --build --csv report.csv
+\`\`\`
+
+Add `--hash` to also record each file's MD5 in the snapshot:
+
+\`\`\`sh
+ftpdiff --host ftp.example.com --user myuser \
+  --remote-dir /var/www/site --build --hash --csv report.csv
+\`\`\`
+
+`report.csv` now holds a full snapshot of the remote scan (its
+`remote_size`/`remote_md5` columns; `status` is `Scan` for every row),
+which can later be reused as a `--remote-csv` input - see the third
+example below.
+```
+
+(the un-escaped triple backticks in the actual file - the `\`\`\`` above
+is just to keep this instruction block's own code fence from closing
+early; write plain ` ``` ` in `docs/ftpdiff.md`)
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add tools/ftpdiff/src/main.rs docs/ftpdiff.md
+git commit -m "ftpdiff: wire --build mode into main.rs; update docs"
+```
+
+---
+
+### Task 11: Spec amendment, CHANGES.md, final verification
 
 **Files:**
 - Modify: `docs/superpowers/specs/2026-09-21-ftpdiff-csv-source-design.md`
@@ -1544,6 +2291,17 @@ Append to the `## Unreleased` section of `CHANGES.md`:
   (used only by ftpdiff; `ftpops` and `merge_connection` itself are
   unaffected). Manually smoke-tested all four Live/Csv combinations for
   local/remote plus the missing-setting error path.
+- Added `--build` to ftpdiff: scans exactly one side (`--local-dir`, or
+  `--host`/`--user`/`--remote-dir`) and writes it to `--csv` without
+  comparing - the producer counterpart to `--local-csv`/`--remote-csv`.
+  Requires `--csv`; requires exactly one live side; cannot combine with
+  `--local-csv`/`--remote-csv`. Entries get a new `DiffStatus::Scan`
+  status; with `--hash`, each file's own MD5 is computed unconditionally
+  (not just for matches, since nothing is being matched). Exit code is
+  always `0` or `2`, never `1`. Manually smoke-tested: local build with
+  `--hash`, round-tripping the output back in as `--local-csv`+
+  `--remote-csv`, and both error paths (missing `--csv`, both sides
+  given).
 ```
 
 - [ ] **Step 4: Commit**
@@ -1557,6 +2315,6 @@ git commit -m "Amend ftpdiff CSV-source spec (precedence not error); update CHAN
 
 ## Self-Review Notes
 
-- **Spec coverage:** shared `merge_connection_partial` extraction (Task 1) - `csv_source` module (Task 2) - `apply_hash_comparison` optionality and known-MD5 reuse (Task 3) - `compare()` internal adaptation, unchanged public behavior (Task 4) - CLI flags (Task 5) - `LocalSource`/`RemoteSource` and conditional requirements (Task 6) - orchestration (Task 7) - spec amendment for the precedence-not-error decision (Task 8). All sections of the design spec are covered, with the one deliberate, documented deviation (precedence instead of a hard error for the "both given" case).
+- **Spec coverage:** shared `merge_connection_partial` extraction (Task 1) - `csv_source` module (Task 2) - `apply_hash_comparison` optionality and known-MD5 reuse (Task 3) - `compare()` internal adaptation, unchanged public behavior (Task 4) - CLI flags (Task 5) - `LocalSource`/`RemoteSource` and conditional requirements (Task 6) - orchestration (Task 7) - `DiffStatus::Scan` (Task 8) - `--build` flag and config resolution (Task 9) - `--build` orchestration and docs (Task 10) - spec amendment for the precedence-not-error decision (Task 11). All sections of the design spec (including the "Build mode" addendum) are covered, with the one deliberate, documented deviation (precedence instead of a hard error for the `--local-csv`/`--local-dir` "both given" case).
 - **Placeholder scan:** no `todo!()`/TBD/TODO remain outside plan-writing scaffolding; every task in this plan ships complete code.
-- **Type consistency:** `LocalEntry`/`RemoteEntry` (unchanged, from Task 2 onward) flow unmodified from `csv_source::read_local_entries`/`read_remote_entries` and `local::walk_local_dir`/`remote::walk_remote` into `compare_entries` exactly as before. `PartialConnection` (Task 1) fields match `ConnectionArgs`/`ConnectionJsonConfig`'s existing field names/types. `LocalSource`/`RemoteSource` (Task 6) are consumed with identical variant shapes in `main.rs` (Task 7) - `RemoteSource::Live`'s five named fields match between definition and every match arm that destructures it.
+- **Type consistency:** `LocalEntry`/`RemoteEntry` (unchanged, from Task 2 onward) flow unmodified from `csv_source::read_local_entries`/`read_remote_entries` and `local::walk_local_dir`/`remote::walk_remote` into `compare_entries` exactly as before. `PartialConnection` (Task 1) fields match `ConnectionArgs`/`ConnectionJsonConfig`'s existing field names/types. `LocalSource`/`RemoteSource` (Task 6) are consumed with identical variant shapes in `main.rs` (Task 7) - `RemoteSource::Live`'s five named fields match between definition and every match arm that destructures it. `BuildSide::Remote` (Task 9) uses the identical five named fields as `RemoteSource::Live`, matched the same way in `run_build` (Task 10). `DiffStatus::Scan` (Task 8) is consumed identically by `output::format_entry`/`summarize` (Task 8) and constructed identically by `run_build` (Task 10).
