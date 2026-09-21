@@ -4,6 +4,8 @@
 //! See `docs/superpowers/specs/2026-09-21-ftpops-design.md` for the
 //! design this binary implements.
 
+mod filter;
+
 fn main() {
     println!("ftpops: not yet implemented");
 }
