@@ -8,6 +8,7 @@ mod cli;
 mod csv_input;
 mod filter;
 mod ops;
+mod output;
 mod validate;
 
 fn main() {
