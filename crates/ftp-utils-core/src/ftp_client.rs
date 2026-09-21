@@ -131,4 +131,30 @@ impl FtpConnection for SuppaFtpConnection {
         .map_err(|e| FtpConnectionError(e.to_string()))?;
         Ok(cursor.into_inner())
     }
+
+    fn store_from_buffer(&mut self, path: &str, data: &[u8]) -> Result<(), FtpConnectionError> {
+        let mut reader = std::io::Cursor::new(data);
+        match self {
+            SuppaFtpConnection::Plain(stream) => stream.put_file(path, &mut reader),
+            SuppaFtpConnection::Tls(stream) => stream.put_file(path, &mut reader),
+        }
+        .map_err(|e| FtpConnectionError(e.to_string()))?;
+        Ok(())
+    }
+
+    fn delete(&mut self, path: &str) -> Result<(), FtpConnectionError> {
+        match self {
+            SuppaFtpConnection::Plain(stream) => stream.rm(path),
+            SuppaFtpConnection::Tls(stream) => stream.rm(path),
+        }
+        .map_err(|e| FtpConnectionError(e.to_string()))
+    }
+
+    fn create_dir(&mut self, path: &str) -> Result<(), FtpConnectionError> {
+        match self {
+            SuppaFtpConnection::Plain(stream) => stream.mkdir(path),
+            SuppaFtpConnection::Tls(stream) => stream.mkdir(path),
+        }
+        .map_err(|e| FtpConnectionError(e.to_string()))
+    }
 }

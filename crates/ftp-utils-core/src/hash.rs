@@ -79,6 +79,18 @@ mod tests {
         fn retr_to_buffer(&mut self, _path: &str) -> Result<Vec<u8>, FtpConnectionError> {
             Ok(self.remote_bytes.clone())
         }
+
+        fn store_from_buffer(&mut self, _path: &str, _data: &[u8]) -> Result<(), FtpConnectionError> {
+            Ok(())
+        }
+
+        fn delete(&mut self, _path: &str) -> Result<(), FtpConnectionError> {
+            Ok(())
+        }
+
+        fn create_dir(&mut self, _path: &str) -> Result<(), FtpConnectionError> {
+            Ok(())
+        }
     }
 
     fn entry(relative_path: &str) -> DiffEntry {

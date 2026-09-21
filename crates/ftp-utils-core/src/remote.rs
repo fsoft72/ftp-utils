@@ -41,6 +41,40 @@ pub trait FtpConnection {
     fn try_hash(&mut self, path: &str) -> Option<String>;
     /// Downloads the full contents of `path` into memory.
     fn retr_to_buffer(&mut self, path: &str) -> Result<Vec<u8>, FtpConnectionError>;
+    /// Uploads `data` to `path`, overwriting any existing remote file.
+    fn store_from_buffer(&mut self, path: &str, data: &[u8]) -> Result<(), FtpConnectionError>;
+    /// Deletes the remote file at `path`.
+    fn delete(&mut self, path: &str) -> Result<(), FtpConnectionError>;
+    /// Creates a single directory at `path`. Its parent must already exist.
+    fn create_dir(&mut self, path: &str) -> Result<(), FtpConnectionError>;
+
+    /// Ensures every directory component of `path`'s parent exists,
+    /// creating any that are missing. `path` is the full remote path to a
+    /// file; only its parent directories are created. Built generically
+    /// on `list_dir` and `create_dir`, so any implementer gets it for
+    /// free without needing its own recursive-mkdir logic.
+    fn ensure_remote_dir(&mut self, path: &str) -> Result<(), FtpConnectionError> {
+        let parent = match path.rfind('/') {
+            Some(idx) if idx > 0 => &path[..idx],
+            _ => return Ok(()),
+        };
+
+        let mut current = String::new();
+        for component in parent.split('/').filter(|c| !c.is_empty()) {
+            let listing_parent = if current.is_empty() { "/".to_string() } else { current.clone() };
+            current.push('/');
+            current.push_str(component);
+
+            let existing = self.list_dir(&listing_parent)?;
+            if existing.iter().any(|e| e.is_dir && e.name == component) {
+                continue;
+            }
+
+            self.create_dir(&current)?;
+        }
+
+        Ok(())
+    }
 }
 
 /// Recursively walks `root` on the remote server, returning one entry per
@@ -97,6 +131,7 @@ mod tests {
 
     struct MockFtpConnection {
         listings: HashMap<String, Vec<RawRemoteEntry>>,
+        created_dirs: Vec<String>,
     }
 
     impl FtpConnection for MockFtpConnection {
@@ -114,6 +149,29 @@ mod tests {
         fn retr_to_buffer(&mut self, _path: &str) -> Result<Vec<u8>, FtpConnectionError> {
             Ok(Vec::new())
         }
+
+        fn store_from_buffer(&mut self, _path: &str, _data: &[u8]) -> Result<(), FtpConnectionError> {
+            Ok(())
+        }
+
+        fn delete(&mut self, _path: &str) -> Result<(), FtpConnectionError> {
+            Ok(())
+        }
+
+        fn create_dir(&mut self, path: &str) -> Result<(), FtpConnectionError> {
+            self.created_dirs.push(path.to_string());
+
+            let (parent, name) = path.rsplit_once('/').unwrap_or(("", path));
+            let parent = if parent.is_empty() { "/" } else { parent };
+
+            self.listings
+                .entry(parent.to_string())
+                .or_default()
+                .push(RawRemoteEntry { name: name.to_string(), is_dir: true, size: 0 });
+            self.listings.entry(path.to_string()).or_default();
+
+            Ok(())
+        }
     }
 
     #[test]
@@ -130,7 +188,7 @@ mod tests {
             "/remote/sub".to_string(),
             vec![RawRemoteEntry { name: "b.txt".into(), is_dir: false, size: 20 }],
         );
-        let mut conn = MockFtpConnection { listings };
+        let mut conn = MockFtpConnection { listings, created_dirs: Vec::new() };
 
         let mut entries = walk_remote(&mut conn, "/remote", &[], None).unwrap();
         entries.sort_by(|a, b| a.relative_path.cmp(&b.relative_path));
@@ -154,7 +212,7 @@ mod tests {
                 RawRemoteEntry { name: "skip.tmp".into(), is_dir: false, size: 1 },
             ],
         );
-        let mut conn = MockFtpConnection { listings };
+        let mut conn = MockFtpConnection { listings, created_dirs: Vec::new() };
 
         let entries = walk_remote(&mut conn, "/remote", &["*.tmp".to_string()], None).unwrap();
 
@@ -172,7 +230,7 @@ mod tests {
                 RawRemoteEntry { name: "skip.tmp".into(), is_dir: false, size: 1 },
             ],
         );
-        let mut conn = MockFtpConnection { listings };
+        let mut conn = MockFtpConnection { listings, created_dirs: Vec::new() };
 
         let mut messages = Vec::new();
         let mut progress = |msg: &str| messages.push(msg.to_string());
@@ -180,5 +238,39 @@ mod tests {
         walk_remote(&mut conn, "/remote", &["*.tmp".to_string()], Some(&mut progress)).unwrap();
 
         assert_eq!(messages, vec!["remote: keep.txt".to_string()]);
+    }
+
+    #[test]
+    fn ensure_remote_dir_creates_missing_components() {
+        let mut listings = HashMap::new();
+        listings.insert("/".to_string(), vec![]);
+        let mut conn = MockFtpConnection { listings, created_dirs: Vec::new() };
+
+        conn.ensure_remote_dir("/a/b/file.txt").unwrap();
+
+        assert_eq!(conn.created_dirs, vec!["/a".to_string(), "/a/b".to_string()]);
+    }
+
+    #[test]
+    fn ensure_remote_dir_skips_components_that_already_exist() {
+        let mut listings = HashMap::new();
+        listings.insert("/".to_string(), vec![RawRemoteEntry { name: "a".into(), is_dir: true, size: 0 }]);
+        listings.insert("/a".to_string(), vec![]);
+        let mut conn = MockFtpConnection { listings, created_dirs: Vec::new() };
+
+        conn.ensure_remote_dir("/a/b/file.txt").unwrap();
+
+        assert_eq!(conn.created_dirs, vec!["/a/b".to_string()]);
+    }
+
+    #[test]
+    fn ensure_remote_dir_is_a_noop_for_root_level_files() {
+        let mut listings = HashMap::new();
+        listings.insert("/".to_string(), vec![]);
+        let mut conn = MockFtpConnection { listings, created_dirs: Vec::new() };
+
+        conn.ensure_remote_dir("/file.txt").unwrap();
+
+        assert!(conn.created_dirs.is_empty());
     }
 }

@@ -102,6 +102,18 @@ mod tests {
         fn retr_to_buffer(&mut self, _path: &str) -> Result<Vec<u8>, FtpConnectionError> {
             Ok(Vec::new())
         }
+
+        fn store_from_buffer(&mut self, _path: &str, _data: &[u8]) -> Result<(), FtpConnectionError> {
+            Ok(())
+        }
+
+        fn delete(&mut self, _path: &str) -> Result<(), FtpConnectionError> {
+            Ok(())
+        }
+
+        fn create_dir(&mut self, _path: &str) -> Result<(), FtpConnectionError> {
+            Ok(())
+        }
     }
 
     #[test]
