@@ -10,6 +10,10 @@ suppaftp.workspace = true
 glob.workspace = true
 walkdir.workspace = true
 md5.workspace = true
+clap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+rpassword.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
