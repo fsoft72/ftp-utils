@@ -250,6 +250,7 @@ name = "ftp-utils-core"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "csv",
  "glob",
  "md5",
  "rpassword",
@@ -268,6 +269,7 @@ dependencies = [
  "colored",
  "csv",
  "ftp-utils-core",
+ "md5",
  "rpassword",
  "serde",
  "serde_json",
