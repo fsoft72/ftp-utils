@@ -22,17 +22,10 @@ pub struct RemoteEntry {
     pub size: u64,
 }
 
-/// Error from any FTP operation, wrapping the underlying client's error text.
-#[derive(Debug)]
-pub struct FtpConnectionError(pub String);
-
-impl std::fmt::Display for FtpConnectionError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
+crate::message_error! {
+    /// Error from any FTP operation, wrapping the underlying client's error text.
+    pub FtpConnectionError
 }
-
-impl std::error::Error for FtpConnectionError {}
 
 /// Abstraction over an FTP/FTPS connection, so directory walking and hash
 /// fallback logic can be unit-tested without a real network connection.

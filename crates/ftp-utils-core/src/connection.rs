@@ -96,17 +96,10 @@ pub struct EffectiveConnection {
     pub local_dir: PathBuf,
 }
 
-/// Error from config loading, merging, or password resolution.
-#[derive(Debug)]
-pub struct ConnectionError(pub String);
-
-impl std::fmt::Display for ConnectionError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
+crate::message_error! {
+    /// Error from config loading, merging, or password resolution.
+    pub ConnectionError
 }
-
-impl std::error::Error for ConnectionError {}
 
 /// Loads and parses a JSON config file into any `Deserialize` type.
 pub fn load_json_config<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T, ConnectionError> {

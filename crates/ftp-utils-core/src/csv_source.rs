@@ -8,16 +8,10 @@ use std::path::Path;
 use crate::local::LocalEntry;
 use crate::remote::RemoteEntry;
 
-#[derive(Debug)]
-pub struct CsvSourceError(pub String);
-
-impl std::fmt::Display for CsvSourceError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
+crate::message_error! {
+    /// Error reading a CSV report used as a comparison source.
+    pub CsvSourceError
 }
-
-impl std::error::Error for CsvSourceError {}
 
 struct RawRow {
     relative_path: String,

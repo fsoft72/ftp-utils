@@ -12,17 +12,10 @@ pub struct ExcludeSet {
     dir_patterns: Vec<Pattern>,
 }
 
-/// An exclude pattern that is not valid glob syntax.
-#[derive(Debug)]
-pub struct ExcludeError(pub String);
-
-impl std::fmt::Display for ExcludeError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
+crate::message_error! {
+    /// An exclude pattern that is not valid glob syntax.
+    pub ExcludeError
 }
-
-impl std::error::Error for ExcludeError {}
 
 impl ExcludeSet {
     /// Compiles `patterns` (glob syntax). Fails on the first invalid

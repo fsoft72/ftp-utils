@@ -9,16 +9,10 @@ pub struct CsvRow {
     pub status: String,
 }
 
-#[derive(Debug)]
-pub struct CsvError(pub String);
-
-impl std::fmt::Display for CsvError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
+ftp_utils_core::message_error! {
+    /// Error reading the ftpdiff CSV report given to ftpops.
+    pub CsvError
 }
-
-impl std::error::Error for CsvError {}
 
 /// Reads every row of the CSV at `path`, keyed by its `path` and `status`
 /// columns (as written by `ftpdiff --csv`; extra columns are ignored).

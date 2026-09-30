@@ -22,16 +22,10 @@ pub enum DeleteTarget {
     Remote,
 }
 
-#[derive(Debug)]
-pub struct ValidationError(pub String);
-
-impl std::fmt::Display for ValidationError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
+ftp_utils_core::message_error! {
+    /// A `--filter` value that doesn't fit the chosen `--to`/`--on` direction.
+    pub ValidationError
 }
-
-impl std::error::Error for ValidationError {}
 
 pub fn validate_copy(to: CopyTarget, filter: Filter) -> Result<(), ValidationError> {
     match (to, filter) {

@@ -11,6 +11,7 @@ pub mod compare;
 pub mod connection;
 pub mod csv_source;
 pub mod diff;
+pub mod error;
 pub mod exclude;
 pub mod ftp_client;
 pub mod hash;
