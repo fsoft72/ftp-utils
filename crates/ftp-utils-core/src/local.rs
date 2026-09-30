@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use crate::exclude::is_excluded;
+use crate::exclude::ExcludeSet;
 
 /// A file found while walking the local directory tree.
 #[derive(Debug, Clone, PartialEq)]
@@ -17,12 +17,21 @@ pub struct LocalEntry {
 /// human-readable message for every included file, for `--verbose` output.
 pub fn walk_local_dir(
     root: &Path,
-    excludes: &[String],
+    excludes: &ExcludeSet,
     mut progress: Option<&mut (dyn FnMut(&str) + '_)>,
 ) -> std::io::Result<Vec<LocalEntry>> {
     let mut entries = Vec::new();
 
-    for result in walkdir::WalkDir::new(root) {
+    // Skip whole excluded directories instead of walking into them.
+    let walker = walkdir::WalkDir::new(root).into_iter().filter_entry(|entry| {
+        if !entry.file_type().is_dir() || entry.depth() == 0 {
+            return true;
+        }
+        let relative = entry.path().strip_prefix(root).map(|p| p.to_string_lossy().replace('\\', "/"));
+        !relative.is_ok_and(|dir| excludes.excludes_dir(&dir))
+    });
+
+    for result in walker {
         let dir_entry = result.map_err(std::io::Error::other)?;
         if !dir_entry.file_type().is_file() {
             continue;
@@ -35,7 +44,7 @@ pub fn walk_local_dir(
             .to_string_lossy()
             .replace('\\', "/");
 
-        if is_excluded(&relative, excludes) {
+        if excludes.is_excluded(&relative) {
             continue;
         }
 
@@ -66,7 +75,7 @@ mod tests {
         fs::create_dir(dir.path().join("sub")).unwrap();
         fs::write(dir.path().join("sub/b.txt"), b"world!").unwrap();
 
-        let mut entries = walk_local_dir(dir.path(), &[], None).unwrap();
+        let mut entries = walk_local_dir(dir.path(), &ExcludeSet::default(), None).unwrap();
         entries.sort_by(|a, b| a.relative_path.cmp(&b.relative_path));
 
         assert_eq!(
@@ -84,10 +93,43 @@ mod tests {
         fs::write(dir.path().join("keep.txt"), b"x").unwrap();
         fs::write(dir.path().join("skip.tmp"), b"y").unwrap();
 
-        let entries = walk_local_dir(dir.path(), &["*.tmp".to_string()], None).unwrap();
+        let entries = walk_local_dir(dir.path(), &ExcludeSet::new(&["*.tmp".to_string()]).unwrap(), None).unwrap();
 
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].relative_path, "keep.txt");
+    }
+
+    #[test]
+    fn skips_files_under_excluded_directories() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir_all(dir.path().join(".git/objects")).unwrap();
+        fs::write(dir.path().join(".git/objects/blob"), b"x").unwrap();
+        fs::write(dir.path().join("keep.txt"), b"y").unwrap();
+        let excludes = ExcludeSet::new(&[".git/*".to_string()]).unwrap();
+
+        let entries = walk_local_dir(dir.path(), &excludes, None).unwrap();
+
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].relative_path, "keep.txt");
+    }
+
+    #[test]
+    fn excluded_directory_is_not_even_opened() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let secret = dir.path().join("secret");
+        fs::create_dir(&secret).unwrap();
+        fs::write(secret.join("f"), b"x").unwrap();
+        fs::set_permissions(&secret, fs::Permissions::from_mode(0o000)).unwrap();
+        let excludes = ExcludeSet::new(&["secret/*".to_string()]).unwrap();
+
+        let result = walk_local_dir(dir.path(), &excludes, None);
+
+        fs::set_permissions(&secret, fs::Permissions::from_mode(0o755)).unwrap();
+        // Would fail with "permission denied" if the walker tried to read it
+        // (unless running as root, where permissions don't apply).
+        assert!(result.is_ok(), "{result:?}");
     }
 
     #[test]
@@ -99,7 +141,7 @@ mod tests {
         let mut messages = Vec::new();
         let mut progress = |msg: &str| messages.push(msg.to_string());
 
-        walk_local_dir(dir.path(), &["*.tmp".to_string()], Some(&mut progress)).unwrap();
+        walk_local_dir(dir.path(), &ExcludeSet::new(&["*.tmp".to_string()]).unwrap(), Some(&mut progress)).unwrap();
 
         assert_eq!(messages, vec!["local: keep.txt".to_string()]);
     }

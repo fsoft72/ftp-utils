@@ -112,3 +112,4 @@
 - Added `--timeout` (JSON `timeout`, default 30s): connect, control-channel and data-channel read/write timeouts; added `DEFAULT_FTP_PORT`/`DEFAULT_TIMEOUT_SECS` constants.
 - `ftpops copy --to local` downloads to a temporary `.<name>.ftpops-part` file and renames it on success; failures keep the previous file.
 - Added `remote::join_remote` (no more `//` for `--remote-dir /` or trailing slashes); local metadata errors name the file.
+- Exclude patterns are compiled once into `ExcludeSet`; invalid globs are a config error (exit 2). Directories fully covered by a `<dir>/*` or `<dir>/**` pattern are no longer walked (local and remote).

@@ -32,9 +32,9 @@
 
 ## Medium
 
-- [ ] **Invalid exclude globs are silently ignored and recompiled per file** - `is_excluded` calls `glob::Pattern::new` for every pattern on every path and maps an invalid pattern to `false`, so a typo silently excludes nothing. Compile patterns once into an `ExcludeSet` at startup and fail with a clear error on invalid ones.
+- [x] **Invalid exclude globs are silently ignored and recompiled per file** - `is_excluded` calls `glob::Pattern::new` for every pattern on every path and maps an invalid pattern to `false`, so a typo silently excludes nothing. Compile patterns once into an `ExcludeSet` at startup and fail with a clear error on invalid ones.
   - File(s): `crates/ftp-utils-core/src/exclude.rs`, `crates/ftp-utils-core/src/local.rs`, `crates/ftp-utils-core/src/remote.rs`
-- [ ] **Excluded directories are still traversed** - excludes are only tested on files, so `--exclude ".git/*"` still lists/walks the entire `.git` tree (a lot of FTP round trips remotely). Test directories too and skip descending (`WalkDir::filter_entry`, and check before pushing to `dirs_to_visit`).
+- [x] **Excluded directories are still traversed** - excludes are only tested on files, so `--exclude ".git/*"` still lists/walks the entire `.git` tree (a lot of FTP round trips remotely). Test directories too and skip descending (`WalkDir::filter_entry`, and check before pushing to `dirs_to_visit`).
   - File(s): `crates/ftp-utils-core/src/local.rs`, `crates/ftp-utils-core/src/remote.rs`
 - [ ] **Repeated string-newtype error types** - `ConnectionError`, `FtpConnectionError`, `CsvSourceError`, `CsvError` and `ValidationError` are identical `pub struct X(pub String)` with copy-pasted `Display`/`Error` impls, and context is lost by stringifying (`e.to_string()`). Introduce one error enum (e.g. with `thiserror`, or a small hand-written one) with source chaining.
   - File(s): `crates/ftp-utils-core/src/connection.rs`, `crates/ftp-utils-core/src/remote.rs`, `crates/ftp-utils-core/src/csv_source.rs`, `tools/ftpops/src/csv_input.rs`, `tools/ftpops/src/validate.rs`

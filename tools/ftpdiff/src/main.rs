@@ -15,7 +15,7 @@ use std::time::Duration;
 use clap::Parser;
 use ftp_utils_core::compare::compare_entries;
 use ftp_utils_core::ftp_client::SuppaFtpConnection;
-use ftp_utils_core::{csv_source, exclude, hash, local, remote, DiffStatus};
+use ftp_utils_core::{csv_source, hash, local, remote, DiffStatus};
 
 use cli::Cli;
 use config::{LocalSource, RemoteSource};
@@ -77,7 +77,7 @@ fn run() -> i32 {
             }
             let filtered = entries
                 .into_iter()
-                .filter(|e| !exclude::is_excluded(&e.relative_path, &effective.exclude))
+                .filter(|e| !effective.exclude.is_excluded(&e.relative_path))
                 .collect();
             (filtered, known_md5)
         }
@@ -131,7 +131,7 @@ fn run() -> i32 {
             }
             let filtered = entries
                 .into_iter()
-                .filter(|e| !exclude::is_excluded(&e.relative_path, &effective.exclude))
+                .filter(|e| !effective.exclude.is_excluded(&e.relative_path))
                 .collect();
             (filtered, known_md5)
         }

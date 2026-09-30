@@ -4,7 +4,7 @@
 use std::collections::HashSet;
 use std::io::{Read, Write};
 
-use crate::exclude::is_excluded;
+use crate::exclude::ExcludeSet;
 
 /// One entry as reported by a single remote directory listing (before
 /// recursion resolves it into a full relative path).
@@ -132,7 +132,7 @@ pub fn join_remote(root: &str, relative: &str) -> String {
 pub fn walk_remote<C: FtpConnection>(
     conn: &mut C,
     root: &str,
-    excludes: &[String],
+    excludes: &ExcludeSet,
     mut progress: Option<&mut (dyn FnMut(&str) + '_)>,
 ) -> Result<Vec<RemoteEntry>, FtpConnectionError> {
     let mut entries = Vec::new();
@@ -153,11 +153,13 @@ pub fn walk_remote<C: FtpConnection>(
             };
 
             if item.is_dir {
-                dirs_to_visit.push(relative_path);
+                if !excludes.excludes_dir(&relative_path) {
+                    dirs_to_visit.push(relative_path);
+                }
                 continue;
             }
 
-            if is_excluded(&relative_path, excludes) {
+            if excludes.is_excluded(&relative_path) {
                 continue;
             }
 
@@ -238,7 +240,7 @@ mod tests {
         listings.insert("/sub".to_string(), vec![RawRemoteEntry { name: "b.txt".into(), is_dir: false, size: 1 }]);
         let mut conn = MockFtpConnection { listings, created_dirs: Vec::new() };
 
-        let entries = walk_remote(&mut conn, "/", &[], None).unwrap();
+        let entries = walk_remote(&mut conn, "/", &ExcludeSet::default(), None).unwrap();
 
         assert_eq!(entries, vec![RemoteEntry { relative_path: "sub/b.txt".to_string(), size: 1 }]);
     }
@@ -259,7 +261,7 @@ mod tests {
         );
         let mut conn = MockFtpConnection { listings, created_dirs: Vec::new() };
 
-        let mut entries = walk_remote(&mut conn, "/remote", &[], None).unwrap();
+        let mut entries = walk_remote(&mut conn, "/remote", &ExcludeSet::default(), None).unwrap();
         entries.sort_by(|a, b| a.relative_path.cmp(&b.relative_path));
 
         assert_eq!(
@@ -269,6 +271,26 @@ mod tests {
                 RemoteEntry { relative_path: "sub/b.txt".to_string(), size: 20 },
             ]
         );
+    }
+
+    #[test]
+    fn does_not_list_excluded_directories() {
+        let mut listings = HashMap::new();
+        listings.insert(
+            "/remote".to_string(),
+            vec![
+                RawRemoteEntry { name: ".git".into(), is_dir: true, size: 0 },
+                RawRemoteEntry { name: "keep.txt".into(), is_dir: false, size: 1 },
+            ],
+        );
+        // No "/remote/.git" listing: MockFtpConnection errors if it is listed.
+        let mut conn = MockFtpConnection { listings, created_dirs: Vec::new() };
+        let excludes = ExcludeSet::new(&[".git/*".to_string()]).unwrap();
+
+        let entries = walk_remote(&mut conn, "/remote", &excludes, None).unwrap();
+
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].relative_path, "keep.txt");
     }
 
     #[test]
@@ -283,7 +305,7 @@ mod tests {
         );
         let mut conn = MockFtpConnection { listings, created_dirs: Vec::new() };
 
-        let entries = walk_remote(&mut conn, "/remote", &["*.tmp".to_string()], None).unwrap();
+        let entries = walk_remote(&mut conn, "/remote", &ExcludeSet::new(&["*.tmp".to_string()]).unwrap(), None).unwrap();
 
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].relative_path, "keep.txt");
@@ -304,7 +326,7 @@ mod tests {
         let mut messages = Vec::new();
         let mut progress = |msg: &str| messages.push(msg.to_string());
 
-        walk_remote(&mut conn, "/remote", &["*.tmp".to_string()], Some(&mut progress)).unwrap();
+        walk_remote(&mut conn, "/remote", &ExcludeSet::new(&["*.tmp".to_string()]).unwrap(), Some(&mut progress)).unwrap();
 
         assert_eq!(messages, vec!["remote: keep.txt".to_string()]);
     }

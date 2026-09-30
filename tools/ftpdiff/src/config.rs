@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use serde::Deserialize;
 
 use ftp_utils_core::connection::{self, ConnectionJsonConfig};
+use ftp_utils_core::exclude::ExcludeSet;
 
 use crate::cli::Cli;
 
@@ -43,7 +44,7 @@ pub struct EffectiveConfig {
     pub remote: RemoteSource,
     pub hash: bool,
     pub verbose: bool,
-    pub exclude: Vec<String>,
+    pub exclude: ExcludeSet,
     pub csv: Option<PathBuf>,
 }
 
@@ -63,7 +64,7 @@ pub enum BuildSide {
 pub struct BuildConfig {
     pub side: BuildSide,
     pub hash: bool,
-    pub exclude: Vec<String>,
+    pub exclude: ExcludeSet,
     pub csv: PathBuf,
     pub verbose: bool,
 }
@@ -118,8 +119,7 @@ pub fn merge_build(cli: &Cli, json: &JsonConfig) -> Result<BuildConfig, ConfigEr
         ));
     };
 
-    let mut exclude = json.exclude.clone();
-    exclude.extend(cli.exclude.clone());
+    let exclude = merge_excludes(cli, json)?;
 
     Ok(BuildConfig {
         side,
@@ -177,8 +177,7 @@ pub fn merge(cli: &Cli, json: &JsonConfig) -> Result<EffectiveConfig, ConfigErro
         }
     };
 
-    let mut exclude = json.exclude.clone();
-    exclude.extend(cli.exclude.clone());
+    let exclude = merge_excludes(cli, json)?;
 
     Ok(EffectiveConfig {
         local,
@@ -188,6 +187,13 @@ pub fn merge(cli: &Cli, json: &JsonConfig) -> Result<EffectiveConfig, ConfigErro
         exclude,
         csv: cli.csv.clone(),
     })
+}
+
+/// Unions the JSON config's and the CLI's exclude patterns (JSON first)
+/// and compiles them, failing on an invalid glob.
+fn merge_excludes(cli: &Cli, json: &JsonConfig) -> Result<ExcludeSet, ConfigError> {
+    let patterns: Vec<String> = json.exclude.iter().chain(cli.exclude.iter()).cloned().collect();
+    ExcludeSet::new(&patterns).map_err(|e| ConfigError(e.to_string()))
 }
 
 /// Resolves the FTP password using the `FTPDIFF_PASSWORD` environment
@@ -341,7 +347,25 @@ mod tests {
 
         let effective = merge(&cli, &json).unwrap();
 
-        assert_eq!(effective.exclude, vec![".git/*".to_string(), "*.tmp".to_string()]);
+        assert!(effective.exclude.is_excluded(".git/config"));
+        assert!(effective.exclude.is_excluded("file.tmp"));
+        assert!(!effective.exclude.is_excluded("file.txt"));
+    }
+
+    #[test]
+    fn invalid_exclude_pattern_is_a_config_error() {
+        let mut cli = live_cli();
+        cli.exclude = vec!["[unclosed".to_string()];
+
+        let err = merge(&cli, &JsonConfig::default()).unwrap_err();
+        assert!(err.to_string().contains("[unclosed"), "{err}");
+
+        cli.build = true;
+        cli.csv = Some(PathBuf::from("out.csv"));
+        cli.connection.host = None;
+        cli.connection.user = None;
+        cli.connection.remote_dir = None;
+        assert!(merge_build(&cli, &JsonConfig::default()).is_err());
     }
 
     #[test]

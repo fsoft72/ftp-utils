@@ -24,7 +24,7 @@ use std::path::PathBuf;
 pub struct CompareOptions {
     pub local_dir: PathBuf,
     pub remote_dir: String,
-    pub excludes: Vec<String>,
+    pub excludes: exclude::ExcludeSet,
     pub hash: bool,
 }
 
@@ -145,7 +145,7 @@ mod tests {
         let opts = CompareOptions {
             local_dir: dir.path().to_path_buf(),
             remote_dir: "/remote".to_string(),
-            excludes: Vec::new(),
+            excludes: exclude::ExcludeSet::default(),
             hash: false,
         };
 
@@ -177,7 +177,7 @@ mod tests {
         let opts = CompareOptions {
             local_dir: dir.path().to_path_buf(),
             remote_dir: "/remote".to_string(),
-            excludes: Vec::new(),
+            excludes: exclude::ExcludeSet::default(),
             hash: false,
         };
 
