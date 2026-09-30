@@ -10,7 +10,6 @@ mod csv_report;
 mod output;
 
 use std::collections::HashMap;
-use std::time::Duration;
 
 use clap::Parser;
 use ftp_utils_core::compare::compare_entries;
@@ -86,7 +85,7 @@ fn run() -> i32 {
     let mut connection: Option<SuppaFtpConnection> = None;
 
     let (remote_entries, remote_known_md5) = match &effective.remote {
-        RemoteSource::Live { host, port, user, remote_dir, ftps, insecure_tls, timeout_secs } => {
+        RemoteSource::Live(params) => {
             let password = match config::read_password(cli.connection.password.as_deref()) {
                 Ok(p) => p,
                 Err(e) => {
@@ -96,18 +95,24 @@ fn run() -> i32 {
             };
 
             if effective.verbose {
-                eprintln!("Connecting to {host}:{port} as {user} ({})...", if *ftps { "FTPS" } else { "FTP" });
+                eprintln!(
+                    "Connecting to {}:{} as {} ({})...",
+                    params.host,
+                    params.port,
+                    params.user,
+                    if params.ftps { "FTPS" } else { "FTP" }
+                );
             }
 
-            let mut conn = match SuppaFtpConnection::connect(host, *port, user, &password, *ftps, *insecure_tls, Duration::from_secs(*timeout_secs)) {
+            let mut conn = match SuppaFtpConnection::connect_params(params, &password) {
                 Ok(c) => c,
                 Err(e) => {
-                    eprintln!("Error: failed to connect to {host}:{port}: {e}");
+                    eprintln!("Error: failed to connect to {}:{}: {e}", params.host, params.port);
                     return 2;
                 }
             };
 
-            let entries = match remote::walk_remote(&mut conn, remote_dir, &effective.exclude, progress.as_deref_mut()) {
+            let entries = match remote::walk_remote(&mut conn, &params.remote_dir, &effective.exclude, progress.as_deref_mut()) {
                 Ok(entries) => entries,
                 Err(e) => {
                     eprintln!("Error: {e}");
@@ -141,7 +146,7 @@ fn run() -> i32 {
 
     if effective.hash {
         let (conn_opt, remote_root_opt) = match (&mut connection, &effective.remote) {
-            (Some(conn), RemoteSource::Live { remote_dir, .. }) => (Some(conn), Some(remote_dir.as_str())),
+            (Some(conn), RemoteSource::Live(params)) => (Some(conn), Some(params.remote_dir.as_str())),
             _ => (None, None),
         };
         let local_root_opt = match &effective.local {
@@ -239,7 +244,7 @@ fn run_build(cli: &Cli, json_config: &config::JsonConfig) -> i32 {
             }
             out
         }
-        config::BuildSide::Remote { host, port, user, remote_dir, ftps, insecure_tls, timeout_secs } => {
+        config::BuildSide::Remote(params) => {
             let password = match config::read_password(cli.connection.password.as_deref()) {
                 Ok(p) => p,
                 Err(e) => {
@@ -249,18 +254,24 @@ fn run_build(cli: &Cli, json_config: &config::JsonConfig) -> i32 {
             };
 
             if build.verbose {
-                eprintln!("Connecting to {host}:{port} as {user} ({})...", if *ftps { "FTPS" } else { "FTP" });
+                eprintln!(
+                    "Connecting to {}:{} as {} ({})...",
+                    params.host,
+                    params.port,
+                    params.user,
+                    if params.ftps { "FTPS" } else { "FTP" }
+                );
             }
 
-            let mut conn = match SuppaFtpConnection::connect(host, *port, user, &password, *ftps, *insecure_tls, Duration::from_secs(*timeout_secs)) {
+            let mut conn = match SuppaFtpConnection::connect_params(params, &password) {
                 Ok(c) => c,
                 Err(e) => {
-                    eprintln!("Error: failed to connect to {host}:{port}: {e}");
+                    eprintln!("Error: failed to connect to {}:{}: {e}", params.host, params.port);
                     return 2;
                 }
             };
 
-            let scanned = match remote::walk_remote(&mut conn, remote_dir, &build.exclude, progress.as_deref_mut()) {
+            let scanned = match remote::walk_remote(&mut conn, &params.remote_dir, &build.exclude, progress.as_deref_mut()) {
                 Ok(e) => e,
                 Err(e) => {
                     eprintln!("Error: {e}");
@@ -271,7 +282,7 @@ fn run_build(cli: &Cli, json_config: &config::JsonConfig) -> i32 {
             let mut out = Vec::new();
             for item in scanned {
                 let remote_md5 = if build.hash {
-                    let remote_path = remote::join_remote(remote_dir, &item.relative_path);
+                    let remote_path = remote::join_remote(&params.remote_dir, &item.relative_path);
                     match hash::remote_md5(&mut conn, &remote_path) {
                         Ok(md5) => Some(md5),
                         Err(err) => {

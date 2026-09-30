@@ -13,7 +13,6 @@ mod output;
 mod validate;
 
 use std::path::Path;
-use std::time::Duration;
 
 use clap::Parser;
 use ftp_utils_core::connection::{self, ConnectionArgs, EffectiveConnection};
@@ -75,17 +74,8 @@ fn connect(args: &ConnectionArgs, effective: &EffectiveConnection) -> Result<Sup
         }
     };
 
-    SuppaFtpConnection::connect(
-        &effective.host,
-        effective.port,
-        &effective.user,
-        &password,
-        effective.ftps,
-        effective.insecure_tls,
-        Duration::from_secs(effective.timeout_secs),
-    )
-    .map_err(|e| {
-        eprintln!("Error: failed to connect to {}:{}: {e}", effective.host, effective.port);
+    SuppaFtpConnection::connect_params(&effective.remote, &password).map_err(|e| {
+        eprintln!("Error: failed to connect to {}:{}: {e}", effective.remote.host, effective.remote.port);
         2
     })
 }
@@ -131,10 +121,10 @@ fn run_copy(
 
     let results = match to {
         CopyTarget::Local => {
-            ops::copy_to_local(&mut connection, &effective.remote_dir, &effective.local_dir, &filtered, skip_existing)
+            ops::copy_to_local(&mut connection, &effective.remote.remote_dir, &effective.local_dir, &filtered, skip_existing)
         }
         CopyTarget::Remote => {
-            ops::copy_to_remote(&mut connection, &effective.remote_dir, &effective.local_dir, &filtered, skip_existing)
+            ops::copy_to_remote(&mut connection, &effective.remote.remote_dir, &effective.local_dir, &filtered, skip_existing)
         }
     };
 
@@ -183,7 +173,7 @@ fn run_delete(
     if !yes && !filtered.is_empty() {
         let (side, dir) = match on {
             DeleteTarget::Local => ("local", effective.local_dir.display().to_string()),
-            DeleteTarget::Remote => ("remote", effective.remote_dir.clone()),
+            DeleteTarget::Remote => ("remote", effective.remote.remote_dir.clone()),
         };
         let prompt = format!(
             "About to delete {} file(s) on the {side} side under {dir}, based on {}. Continue?",
@@ -210,7 +200,7 @@ fn run_delete(
                 Ok(c) => c,
                 Err(code) => return code,
             };
-            let results = ops::delete_remote(&mut connection, &effective.remote_dir, &filtered);
+            let results = ops::delete_remote(&mut connection, &effective.remote.remote_dir, &filtered);
             connection.close();
             results
         }

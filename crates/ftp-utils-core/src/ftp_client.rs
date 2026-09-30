@@ -11,6 +11,7 @@ use suppaftp::Status;
 use suppaftp::types::FileType;
 use suppaftp::{FtpStream, ImplFtpStream, NativeTlsConnector, NativeTlsFtpStream, TlsStream};
 
+use crate::connection::RemoteParams;
 use crate::remote::{FtpConnection, FtpConnectionError, RawRemoteEntry};
 
 /// Size of the buffer used when streaming downloads.
@@ -169,6 +170,20 @@ impl SuppaFtpConnection {
             .map_err(_ftp_error)?;
         _login_binary(&mut stream, user, password)?;
         Ok(Self::new(Stream::Tls(stream)))
+    }
+
+    /// Connects using resolved `RemoteParams` and `password`; see
+    /// `connect` for the individual settings.
+    pub fn connect_params(params: &RemoteParams, password: &str) -> Result<Self, FtpConnectionError> {
+        Self::connect(
+            &params.host,
+            params.port,
+            &params.user,
+            password,
+            params.ftps,
+            params.insecure_tls,
+            Duration::from_secs(params.timeout_secs),
+        )
     }
 
     /// Sends QUIT and closes the connection. Errors are ignored: by the

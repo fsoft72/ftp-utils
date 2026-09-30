@@ -114,3 +114,4 @@
 - Added `remote::join_remote` (no more `//` for `--remote-dir /` or trailing slashes); local metadata errors name the file.
 - Exclude patterns are compiled once into `ExcludeSet`; invalid globs are a config error (exit 2). Directories fully covered by a `<dir>/*` or `<dir>/**` pattern are no longer walked (local and remote).
 - Added `DiffEntry::new` and replaced repeated struct literals; refreshed the stale `diff.rs` module doc.
+- Introduced `RemoteParams` and `PartialConnection::require_remote`; `RemoteSource::Live`, `BuildSide::Remote` and `EffectiveConnection` now share them; added `SuppaFtpConnection::connect_params`.

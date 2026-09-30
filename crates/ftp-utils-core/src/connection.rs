@@ -75,18 +75,25 @@ pub struct ConnectionJsonConfig {
     pub timeout: Option<u64>,
 }
 
-/// Resolved connection settings after merging CLI args, JSON config, and
-/// defaults.
+/// Everything needed to reach one remote directory over FTP/FTPS (the
+/// password is resolved separately, at connect time).
 #[derive(Debug, Clone)]
-pub struct EffectiveConnection {
+pub struct RemoteParams {
     pub host: String,
     pub port: u16,
     pub user: String,
     pub remote_dir: String,
-    pub local_dir: PathBuf,
     pub ftps: bool,
     pub insecure_tls: bool,
     pub timeout_secs: u64,
+}
+
+/// Resolved connection settings after merging CLI args, JSON config, and
+/// defaults.
+#[derive(Debug, Clone)]
+pub struct EffectiveConnection {
+    pub remote: RemoteParams,
+    pub local_dir: PathBuf,
 }
 
 /// Error from config loading, merging, or password resolution.
@@ -142,6 +149,29 @@ pub fn merge_connection_partial(args: &ConnectionArgs, json: &ConnectionJsonConf
     }
 }
 
+impl PartialConnection {
+    /// Requires `host`, `user` and `remote_dir` and turns them, with the
+    /// other settings, into `RemoteParams`. `alternatives` completes the
+    /// "missing required setting" hint (e.g. `"config file"`).
+    pub fn require_remote(&self, alternatives: &str) -> Result<RemoteParams, ConnectionError> {
+        let require = |value: &Option<String>, name: &str| {
+            value.clone().ok_or_else(|| {
+                ConnectionError(format!("missing required setting: {name} (use --{name}, {alternatives})"))
+            })
+        };
+
+        Ok(RemoteParams {
+            host: require(&self.host, "host")?,
+            port: self.port,
+            user: require(&self.user, "user")?,
+            remote_dir: require(&self.remote_dir, "remote-dir")?,
+            ftps: self.ftps,
+            insecure_tls: self.insecure_tls,
+            timeout_secs: self.timeout_secs,
+        })
+    }
+}
+
 /// Merges CLI args, JSON config, and defaults into `EffectiveConnection`,
 /// requiring `host`/`user`/`remote_dir`/`local_dir` to be resolvable from
 /// one of the two sources.
@@ -151,29 +181,12 @@ pub fn merge_connection(
 ) -> Result<EffectiveConnection, ConnectionError> {
     let partial = merge_connection_partial(args, json);
 
-    let host = partial
-        .host
-        .ok_or_else(|| ConnectionError("missing required setting: host (use --host or config file)".to_string()))?;
-    let user = partial
-        .user
-        .ok_or_else(|| ConnectionError("missing required setting: user (use --user or config file)".to_string()))?;
-    let remote_dir = partial.remote_dir.ok_or_else(|| {
-        ConnectionError("missing required setting: remote-dir (use --remote-dir or config file)".to_string())
-    })?;
+    let remote = partial.require_remote("or config file")?;
     let local_dir = partial.local_dir.ok_or_else(|| {
-        ConnectionError("missing required setting: local-dir (use --local-dir or config file)".to_string())
+        ConnectionError("missing required setting: local-dir (use --local-dir, or config file)".to_string())
     })?;
 
-    Ok(EffectiveConnection {
-        host,
-        port: partial.port,
-        user,
-        remote_dir,
-        local_dir,
-        ftps: partial.ftps,
-        insecure_tls: partial.insecure_tls,
-        timeout_secs: partial.timeout_secs,
-    })
+    Ok(EffectiveConnection { remote, local_dir })
 }
 
 fn password_from_cli_or_env(cli_password: Option<&str>, env_var: &str) -> Option<String> {
@@ -247,9 +260,9 @@ mod tests {
 
         let effective = merge_connection(&args, &json).unwrap();
 
-        assert_eq!(effective.host, "cli-host");
-        assert_eq!(effective.user, "cli-user");
-        assert_eq!(effective.remote_dir, "/cli-remote");
+        assert_eq!(effective.remote.host, "cli-host");
+        assert_eq!(effective.remote.user, "cli-user");
+        assert_eq!(effective.remote.remote_dir, "/cli-remote");
         assert_eq!(effective.local_dir, PathBuf::from("./cli-local"));
     }
 
@@ -266,8 +279,8 @@ mod tests {
 
         let effective = merge_connection(&args, &json).unwrap();
 
-        assert_eq!(effective.host, "json-host");
-        assert_eq!(effective.user, "json-user");
+        assert_eq!(effective.remote.host, "json-host");
+        assert_eq!(effective.remote.user, "json-user");
     }
 
     #[test]
@@ -293,8 +306,27 @@ mod tests {
 
         let effective = merge_connection(&args, &json).unwrap();
 
-        assert!(effective.ftps); // from CLI
-        assert!(effective.insecure_tls); // from JSON
+        assert!(effective.remote.ftps); // from CLI
+        assert!(effective.remote.insecure_tls); // from JSON
+    }
+
+    #[test]
+    fn require_remote_names_the_missing_setting_and_alternatives() {
+        let mut partial = merge_connection_partial(&empty_args(), &ConnectionJsonConfig::default());
+
+        let err = partial.require_remote("config file, or --remote-csv").unwrap_err();
+        assert!(err.to_string().contains("host") && err.to_string().contains("--remote-csv"), "{err}");
+
+        partial.host = Some("h".to_string());
+        assert!(partial.require_remote("x").unwrap_err().to_string().contains("user"));
+
+        partial.user = Some("u".to_string());
+        assert!(partial.require_remote("x").unwrap_err().to_string().contains("remote-dir"));
+
+        partial.remote_dir = Some("/r".to_string());
+        let params = partial.require_remote("x").unwrap();
+        assert_eq!((params.host.as_str(), params.user.as_str(), params.remote_dir.as_str()), ("h", "u", "/r"));
+        assert_eq!((params.port, params.timeout_secs), (21, 30));
     }
 
     #[test]
@@ -307,7 +339,7 @@ mod tests {
 
         let effective = merge_connection(&args, &ConnectionJsonConfig::default()).unwrap();
 
-        assert_eq!(effective.port, 21);
+        assert_eq!(effective.remote.port, 21);
     }
 
     #[test]

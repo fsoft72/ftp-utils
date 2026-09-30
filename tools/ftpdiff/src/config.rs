@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
-use ftp_utils_core::connection::{self, ConnectionJsonConfig};
+use ftp_utils_core::connection::{self, ConnectionJsonConfig, RemoteParams};
 use ftp_utils_core::exclude::ExcludeSet;
 
 use crate::cli::Cli;
@@ -34,7 +34,7 @@ pub enum LocalSource {
 /// Where the remote side of the comparison comes from.
 #[derive(Debug, Clone)]
 pub enum RemoteSource {
-    Live { host: String, port: u16, user: String, remote_dir: String, ftps: bool, insecure_tls: bool, timeout_secs: u64 },
+    Live(RemoteParams),
     Csv(PathBuf),
 }
 
@@ -56,7 +56,7 @@ pub fn load_json_config(path: &Path) -> Result<JsonConfig, ConfigError> {
 #[derive(Debug, Clone)]
 pub enum BuildSide {
     Local(PathBuf),
-    Remote { host: String, port: u16, user: String, remote_dir: String, ftps: bool, insecure_tls: bool, timeout_secs: u64 },
+    Remote(RemoteParams),
 }
 
 /// Resolved settings for a `--build` run.
@@ -95,24 +95,7 @@ pub fn merge_build(cli: &Cli, json: &JsonConfig) -> Result<BuildConfig, ConfigEr
     let side = if has_local {
         BuildSide::Local(partial.local_dir.unwrap())
     } else if has_remote {
-        let host = partial
-            .host
-            .ok_or_else(|| ConfigError("missing required setting: host for --build".to_string()))?;
-        let user = partial
-            .user
-            .ok_or_else(|| ConfigError("missing required setting: user for --build".to_string()))?;
-        let remote_dir = partial
-            .remote_dir
-            .ok_or_else(|| ConfigError("missing required setting: remote-dir for --build".to_string()))?;
-        BuildSide::Remote {
-            host,
-            port: partial.port,
-            user,
-            remote_dir,
-            ftps: partial.ftps,
-            insecure_tls: partial.insecure_tls,
-            timeout_secs: partial.timeout_secs,
-        }
+        BuildSide::Remote(partial.require_remote("or config file")?)
     } else {
         return Err(ConfigError(
             "--build requires --local-dir, or --host/--user/--remote-dir".to_string(),
@@ -155,26 +138,7 @@ pub fn merge(cli: &Cli, json: &JsonConfig) -> Result<EffectiveConfig, ConfigErro
     let remote = if let Some(path) = &cli.remote_csv {
         RemoteSource::Csv(path.clone())
     } else {
-        let host = partial.host.clone().ok_or_else(|| {
-            ConfigError("missing required setting: host (use --host, config file, or --remote-csv)".to_string())
-        })?;
-        let user = partial.user.clone().ok_or_else(|| {
-            ConfigError("missing required setting: user (use --user, config file, or --remote-csv)".to_string())
-        })?;
-        let remote_dir = partial.remote_dir.clone().ok_or_else(|| {
-            ConfigError(
-                "missing required setting: remote-dir (use --remote-dir, config file, or --remote-csv)".to_string(),
-            )
-        })?;
-        RemoteSource::Live {
-            host,
-            port: partial.port,
-            user,
-            remote_dir,
-            ftps: partial.ftps,
-            insecure_tls: partial.insecure_tls,
-            timeout_secs: partial.timeout_secs,
-        }
+        RemoteSource::Live(partial.require_remote("config file, or --remote-csv")?)
     };
 
     let exclude = merge_excludes(cli, json)?;
@@ -263,7 +227,7 @@ mod tests {
         let effective = merge(&cli, &JsonConfig::default()).unwrap();
 
         assert!(matches!(effective.local, LocalSource::Live(ref p) if p == &PathBuf::from("./l")));
-        assert!(matches!(effective.remote, RemoteSource::Live { ref host, .. } if host == "h"));
+        assert!(matches!(effective.remote, RemoteSource::Live(ref params) if params.host == "h"));
     }
 
     #[test]
@@ -428,7 +392,7 @@ mod tests {
 
         let build = merge_build(&cli, &JsonConfig::default()).unwrap();
 
-        assert!(matches!(build.side, BuildSide::Remote { ref host, .. } if host == "h"));
+        assert!(matches!(build.side, BuildSide::Remote(ref params) if params.host == "h"));
     }
 
     #[test]
