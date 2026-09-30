@@ -27,7 +27,7 @@
   - File(s): `tools/ftpdiff/src/main.rs`
 - [ ] **Duplicated connect/password/hash logic between `run`, `run_build` and core** - the connect block appears twice in `main.rs`, and the "try_hash, else download and MD5" logic exists in both `hash.rs` and `run_build`. Add a single `connect_remote(...)` helper and a shared `hash::remote_md5(conn, path)` / `hash::local_md5(path)` in core.
   - File(s): `tools/ftpdiff/src/main.rs`, `crates/ftp-utils-core/src/hash.rs`
-- [ ] **Unused public API in core duplicates the tool's pipeline** - `ftp_utils_core::compare`, `CompareOptions` and `CompareError` are not used by any tool (ftpdiff reimplements the flow in `main.rs`), so the tested path is not the shipped path. Either make `ftpdiff` call `compare` (extended to accept CSV sources) or delete it.
+- [x] **Unused public API in core duplicates the tool's pipeline** - `ftp_utils_core::compare`, `CompareOptions` and `CompareError` are not used by any tool (ftpdiff reimplements the flow in `main.rs`), so the tested path is not the shipped path. Either make `ftpdiff` call `compare` (extended to accept CSV sources) or delete it.
   - File(s): `crates/ftp-utils-core/src/lib.rs`, `tools/ftpdiff/src/main.rs`
 
 ## Medium
