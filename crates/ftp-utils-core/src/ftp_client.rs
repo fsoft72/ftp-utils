@@ -2,6 +2,8 @@
 //! supporting both plain FTP and explicit FTPS (AUTH TLS).
 
 use std::io::{Read, Write};
+use std::net::{TcpStream, ToSocketAddrs};
+use std::time::Duration;
 
 use suppaftp::list::ListParser;
 use suppaftp::native_tls::TlsConnector;
@@ -17,6 +19,51 @@ const TRANSFER_CHUNK_SIZE: usize = 64 * 1024;
 /// Converts a suppaftp error into this crate's error type.
 fn _ftp_error(e: suppaftp::FtpError) -> FtpConnectionError {
     FtpConnectionError(e.to_string())
+}
+
+/// Opens a control connection to `host:port`, trying each resolved
+/// address with `timeout`, and applies `timeout` as the read/write timeout
+/// of the control channel and of every passive data channel it opens.
+fn _connect_with_timeout<T: TlsStream>(
+    host: &str,
+    port: u16,
+    timeout: Duration,
+) -> Result<ImplFtpStream<T>, FtpConnectionError> {
+    let addresses = (host, port)
+        .to_socket_addrs()
+        .map_err(|e| FtpConnectionError(format!("cannot resolve {host}:{port}: {e}")))?;
+
+    let mut last_error = FtpConnectionError(format!("no addresses found for {host}:{port}"));
+    for address in addresses {
+        // Build the TCP stream ourselves so its timeouts are in place
+        // before suppaftp reads the server greeting.
+        let tcp = match TcpStream::connect_timeout(&address, timeout) {
+            Ok(tcp) => tcp,
+            Err(e) => {
+                last_error = FtpConnectionError(format!("cannot connect to {address}: {e}"));
+                continue;
+            }
+        };
+        tcp.set_read_timeout(Some(timeout)).map_err(|e| FtpConnectionError(e.to_string()))?;
+        tcp.set_write_timeout(Some(timeout)).map_err(|e| FtpConnectionError(e.to_string()))?;
+
+        let stream = match ImplFtpStream::<T>::connect_with_stream(tcp) {
+            Ok(stream) => stream,
+            Err(e) => {
+                last_error = _ftp_error(e);
+                continue;
+            }
+        };
+
+        return Ok(stream.passive_stream_builder(move |data_address| {
+            let data = TcpStream::connect_timeout(&data_address, timeout).map_err(suppaftp::FtpError::ConnectionError)?;
+            data.set_read_timeout(Some(timeout)).map_err(suppaftp::FtpError::ConnectionError)?;
+            data.set_write_timeout(Some(timeout)).map_err(suppaftp::FtpError::ConnectionError)?;
+            Ok(data)
+        }));
+    }
+
+    Err(last_error)
 }
 
 /// Logs in and switches to binary transfer mode; shared by the plain and
@@ -83,6 +130,10 @@ impl SuppaFtpConnection {
     /// rewrites line endings in transit and would corrupt size/hash
     /// comparisons for any file containing `\n`.
     ///
+    /// `timeout` bounds the TCP connect and every later read/write on the
+    /// control and data channels, so a dead or stalled server fails the
+    /// operation instead of hanging it.
+    ///
     /// When `ftps` is true, `insecure_tls` controls certificate
     /// validation: false (default) validates the server's certificate and
     /// hostname normally; true accepts any certificate, including expired,
@@ -97,16 +148,15 @@ impl SuppaFtpConnection {
         password: &str,
         ftps: bool,
         insecure_tls: bool,
+        timeout: Duration,
     ) -> Result<Self, FtpConnectionError> {
-        let address = format!("{host}:{port}");
-
         if !ftps {
-            let mut stream = FtpStream::connect(&address).map_err(_ftp_error)?;
+            let mut stream: FtpStream = _connect_with_timeout(host, port, timeout)?;
             _login_binary(&mut stream, user, password)?;
             return Ok(Self::new(Stream::Plain(stream)));
         }
 
-        let stream = NativeTlsFtpStream::connect(&address).map_err(_ftp_error)?;
+        let stream: NativeTlsFtpStream = _connect_with_timeout(host, port, timeout)?;
         let mut connector_builder = TlsConnector::builder();
         if insecure_tls {
             connector_builder
@@ -268,6 +318,33 @@ mod tests {
 
     fn lines(input: &[&str]) -> Vec<String> {
         input.iter().map(|l| l.to_string()).collect()
+    }
+
+    #[test]
+    fn connect_times_out_when_server_never_sends_a_greeting() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        // Accept and hold the socket open without ever writing to it.
+        let holder = std::thread::spawn(move || listener.accept().map(|(socket, _)| {
+            std::thread::sleep(Duration::from_millis(1500));
+            drop(socket);
+        }));
+
+        let started = std::time::Instant::now();
+        let result = SuppaFtpConnection::connect("127.0.0.1", port, "u", "p", false, false, Duration::from_millis(300));
+
+        assert!(result.is_err());
+        assert!(started.elapsed() < Duration::from_secs(1), "took {:?}", started.elapsed());
+        holder.join().unwrap().unwrap();
+    }
+
+    #[test]
+    fn connect_fails_fast_when_nothing_listens() {
+        let port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+
+        let result = SuppaFtpConnection::connect("127.0.0.1", port, "u", "p", false, false, Duration::from_millis(300));
+
+        assert!(result.is_err());
     }
 
     #[test]

@@ -59,6 +59,7 @@ exit code `2` and deletes nothing. `--dry-run` never prompts.
 | `--local-dir <path>` | Local base directory (relative CSV paths are joined onto this) |
 | `--ftps` | Use explicit FTPS (AUTH TLS) instead of plain FTP |
 | `--insecure-tls` | With `--ftps`, accept any TLS certificate instead of validating it. Off by default; removes protection against man-in-the-middle attacks |
+| `--timeout <secs>` | Connect, read and write timeout in seconds (default `30`); a stalled transfer fails instead of hanging |
 | `--password <password>` | FTP password (least preferred source - see below) |
 | `-h`, `--help` | Print help |
 

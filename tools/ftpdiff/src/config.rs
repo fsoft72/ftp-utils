@@ -33,7 +33,7 @@ pub enum LocalSource {
 /// Where the remote side of the comparison comes from.
 #[derive(Debug, Clone)]
 pub enum RemoteSource {
-    Live { host: String, port: u16, user: String, remote_dir: String, ftps: bool, insecure_tls: bool },
+    Live { host: String, port: u16, user: String, remote_dir: String, ftps: bool, insecure_tls: bool, timeout_secs: u64 },
     Csv(PathBuf),
 }
 
@@ -55,7 +55,7 @@ pub fn load_json_config(path: &Path) -> Result<JsonConfig, ConfigError> {
 #[derive(Debug, Clone)]
 pub enum BuildSide {
     Local(PathBuf),
-    Remote { host: String, port: u16, user: String, remote_dir: String, ftps: bool, insecure_tls: bool },
+    Remote { host: String, port: u16, user: String, remote_dir: String, ftps: bool, insecure_tls: bool, timeout_secs: u64 },
 }
 
 /// Resolved settings for a `--build` run.
@@ -110,6 +110,7 @@ pub fn merge_build(cli: &Cli, json: &JsonConfig) -> Result<BuildConfig, ConfigEr
             remote_dir,
             ftps: partial.ftps,
             insecure_tls: partial.insecure_tls,
+            timeout_secs: partial.timeout_secs,
         }
     } else {
         return Err(ConfigError(
@@ -172,6 +173,7 @@ pub fn merge(cli: &Cli, json: &JsonConfig) -> Result<EffectiveConfig, ConfigErro
             remote_dir,
             ftps: partial.ftps,
             insecure_tls: partial.insecure_tls,
+            timeout_secs: partial.timeout_secs,
         }
     };
 
@@ -209,6 +211,7 @@ mod tests {
                 local_dir: None,
                 ftps: false,
                 insecure_tls: false,
+                timeout: None,
                 password: None,
             },
             hash: false,

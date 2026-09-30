@@ -46,7 +46,7 @@
   - File(s): `crates/ftp-utils-core/src/compare.rs`, `crates/ftp-utils-core/src/diff.rs`, `tools/ftpdiff/src/main.rs`
 - [x] **FTPS and plain connect branches are copy-pasted** - the two arms of `SuppaFtpConnection::connect` (login, `transfer_type`) and every `match self { Plain(..) => .., Tls(..) => .. }` in the trait impl duplicate code. Use a small macro or a helper that dispatches on the enum once.
   - File(s): `crates/ftp-utils-core/src/ftp_client.rs`
-- [ ] **No connect/read timeouts** - `FtpStream::connect` blocks indefinitely on a dead host or stalled transfer. Use `connect_timeout` and set read/write timeouts on the control and data channels, exposed as a `--timeout` option.
+- [x] **No connect/read timeouts** - `FtpStream::connect` blocks indefinitely on a dead host or stalled transfer. Use `connect_timeout` and set read/write timeouts on the control and data channels, exposed as a `--timeout` option.
   - File(s): `crates/ftp-utils-core/src/ftp_client.rs`, `crates/ftp-utils-core/src/connection.rs`
 - [ ] **Non-atomic local writes in `copy_to_local`** - a failed or interrupted download leaves a truncated file at the final path, which later looks like a size mismatch or, with `--skip-existing`, is skipped as "already exists". Write to a temporary file in the same directory and `rename` on success.
   - File(s): `tools/ftpops/src/ops.rs`

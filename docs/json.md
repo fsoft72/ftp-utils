@@ -32,6 +32,7 @@ are accepted by every tool's `--config` file.
 | `local_dir` | string | `--local-dir` | *(required)* | Local base directory. |
 | `ftps` | boolean | `--ftps` | `false` | Use explicit FTPS (AUTH TLS) instead of plain FTP. |
 | `insecure_tls` | boolean | `--insecure-tls` | `false` | With `ftps: true`, accept any TLS certificate (expired, self-signed, hostname mismatch) instead of validating it. Removes protection against man-in-the-middle attacks - only use for servers whose certificate you can't otherwise validate. |
+| `timeout` | integer | `--timeout` | `30` | Connect, read and write timeout in seconds. |
 
 **Not accepted in JSON, for any tool:** the FTP password. It is resolved
 at runtime from (in order) the `--password` CLI flag, an environment

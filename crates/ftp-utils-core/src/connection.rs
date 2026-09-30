@@ -8,6 +8,12 @@ use std::path::{Path, PathBuf};
 use clap::Args;
 use serde::Deserialize;
 
+/// Default FTP port, used when neither `--port` nor the config sets one.
+pub const DEFAULT_FTP_PORT: u16 = 21;
+
+/// Default connect/read/write timeout, in seconds.
+pub const DEFAULT_TIMEOUT_SECS: u64 = 30;
+
 /// Shared connection flags. Embed via `#[command(flatten)]` in a tool's
 /// own `clap::Parser` struct.
 #[derive(Args, Debug, Clone)]
@@ -35,6 +41,12 @@ pub struct ConnectionArgs {
     #[arg(long)]
     pub ftps: bool,
 
+    /// Connect, read and write timeout in seconds (default 30). A
+    /// transfer that makes no progress for this long fails instead of
+    /// hanging.
+    #[arg(long)]
+    pub timeout: Option<u64>,
+
     /// Accept any TLS certificate (expired, self-signed, hostname
     /// mismatch) when using --ftps, instead of validating it. Only use
     /// this for servers whose certificate you can't otherwise validate:
@@ -60,6 +72,7 @@ pub struct ConnectionJsonConfig {
     pub local_dir: Option<PathBuf>,
     pub ftps: Option<bool>,
     pub insecure_tls: Option<bool>,
+    pub timeout: Option<u64>,
 }
 
 /// Resolved connection settings after merging CLI args, JSON config, and
@@ -73,6 +86,7 @@ pub struct EffectiveConnection {
     pub local_dir: PathBuf,
     pub ftps: bool,
     pub insecure_tls: bool,
+    pub timeout_secs: u64,
 }
 
 /// Error from config loading, merging, or password resolution.
@@ -109,6 +123,7 @@ pub struct PartialConnection {
     pub local_dir: Option<PathBuf>,
     pub ftps: bool,
     pub insecure_tls: bool,
+    pub timeout_secs: u64,
 }
 
 /// Merges CLI args, JSON config, and defaults, without requiring any
@@ -117,12 +132,13 @@ pub struct PartialConnection {
 pub fn merge_connection_partial(args: &ConnectionArgs, json: &ConnectionJsonConfig) -> PartialConnection {
     PartialConnection {
         host: args.host.clone().or_else(|| json.host.clone()),
-        port: args.port.or(json.port).unwrap_or(21),
+        port: args.port.or(json.port).unwrap_or(DEFAULT_FTP_PORT),
         user: args.user.clone().or_else(|| json.user.clone()),
         remote_dir: args.remote_dir.clone().or_else(|| json.remote_dir.clone()),
         local_dir: args.local_dir.clone().or_else(|| json.local_dir.clone()),
         ftps: args.ftps || json.ftps.unwrap_or(false),
         insecure_tls: args.insecure_tls || json.insecure_tls.unwrap_or(false),
+        timeout_secs: args.timeout.or(json.timeout).unwrap_or(DEFAULT_TIMEOUT_SECS),
     }
 }
 
@@ -156,6 +172,7 @@ pub fn merge_connection(
         local_dir,
         ftps: partial.ftps,
         insecure_tls: partial.insecure_tls,
+        timeout_secs: partial.timeout_secs,
     })
 }
 
@@ -195,6 +212,7 @@ mod tests {
             local_dir: None,
             ftps: false,
             insecure_tls: false,
+            timeout: None,
             password: None,
         }
     }
@@ -290,6 +308,18 @@ mod tests {
         let effective = merge_connection(&args, &ConnectionJsonConfig::default()).unwrap();
 
         assert_eq!(effective.port, 21);
+    }
+
+    #[test]
+    fn timeout_defaults_and_cli_overrides_json() {
+        let mut args = empty_args();
+        let json = ConnectionJsonConfig { timeout: Some(90), ..Default::default() };
+
+        assert_eq!(merge_connection_partial(&args, &ConnectionJsonConfig::default()).timeout_secs, 30);
+        assert_eq!(merge_connection_partial(&args, &json).timeout_secs, 90);
+
+        args.timeout = Some(5);
+        assert_eq!(merge_connection_partial(&args, &json).timeout_secs, 5);
     }
 
     #[test]

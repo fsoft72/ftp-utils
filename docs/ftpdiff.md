@@ -26,6 +26,7 @@ override the JSON file, which overrides built-in defaults.
 | `--local-dir <path>` | Local directory to compare |
 | `--ftps` | Use explicit FTPS (AUTH TLS) instead of plain FTP |
 | `--insecure-tls` | With `--ftps`, accept any TLS certificate instead of validating it. Off by default; removes protection against man-in-the-middle attacks - only use for servers whose certificate you can't otherwise validate |
+| `--timeout <secs>` | Connect, read and write timeout in seconds (default `30`); a stalled transfer fails instead of hanging |
 | `--password <password>` | FTP password. Prefer the environment variable or the interactive prompt over this flag: a CLI argument can leak into shell history and process listings |
 | `--hash` | Compare files by MD5 hash in addition to size, for entries that already match by size |
 | `--exclude <glob>` | Glob pattern to exclude from comparison; repeatable |

@@ -10,6 +10,7 @@ mod csv_report;
 mod output;
 
 use std::collections::HashMap;
+use std::time::Duration;
 
 use clap::Parser;
 use ftp_utils_core::compare::compare_entries;
@@ -85,7 +86,7 @@ fn run() -> i32 {
     let mut connection: Option<SuppaFtpConnection> = None;
 
     let (remote_entries, remote_known_md5) = match &effective.remote {
-        RemoteSource::Live { host, port, user, remote_dir, ftps, insecure_tls } => {
+        RemoteSource::Live { host, port, user, remote_dir, ftps, insecure_tls, timeout_secs } => {
             let password = match config::read_password(cli.connection.password.as_deref()) {
                 Ok(p) => p,
                 Err(e) => {
@@ -98,7 +99,7 @@ fn run() -> i32 {
                 eprintln!("Connecting to {host}:{port} as {user} ({})...", if *ftps { "FTPS" } else { "FTP" });
             }
 
-            let mut conn = match SuppaFtpConnection::connect(host, *port, user, &password, *ftps, *insecure_tls) {
+            let mut conn = match SuppaFtpConnection::connect(host, *port, user, &password, *ftps, *insecure_tls, Duration::from_secs(*timeout_secs)) {
                 Ok(c) => c,
                 Err(e) => {
                     eprintln!("Error: failed to connect to {host}:{port}: {e}");
@@ -243,7 +244,7 @@ fn run_build(cli: &Cli, json_config: &config::JsonConfig) -> i32 {
             }
             out
         }
-        config::BuildSide::Remote { host, port, user, remote_dir, ftps, insecure_tls } => {
+        config::BuildSide::Remote { host, port, user, remote_dir, ftps, insecure_tls, timeout_secs } => {
             let password = match config::read_password(cli.connection.password.as_deref()) {
                 Ok(p) => p,
                 Err(e) => {
@@ -256,7 +257,7 @@ fn run_build(cli: &Cli, json_config: &config::JsonConfig) -> i32 {
                 eprintln!("Connecting to {host}:{port} as {user} ({})...", if *ftps { "FTPS" } else { "FTP" });
             }
 
-            let mut conn = match SuppaFtpConnection::connect(host, *port, user, &password, *ftps, *insecure_tls) {
+            let mut conn = match SuppaFtpConnection::connect(host, *port, user, &password, *ftps, *insecure_tls, Duration::from_secs(*timeout_secs)) {
                 Ok(c) => c,
                 Err(e) => {
                     eprintln!("Error: failed to connect to {host}:{port}: {e}");

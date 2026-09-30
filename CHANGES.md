@@ -109,3 +109,4 @@
 - Transfers and hashing now stream: added `FtpConnection::retr_to_writer`/`store_from_reader`, `hash::local_md5`/`remote_md5`; hash errors name the file.
 - Implemented server-side hashing in `SuppaFtpConnection::try_hash` (`XMD5`, then `MD5`, probed once per connection, digest validated); falls back to streamed download. Stream dispatch now uses a `with_stream!` macro.
 - Deduplicated the plain/FTPS connect paths in `SuppaFtpConnection::connect` (generic login helper).
+- Added `--timeout` (JSON `timeout`, default 30s): connect, control-channel and data-channel read/write timeouts; added `DEFAULT_FTP_PORT`/`DEFAULT_TIMEOUT_SECS` constants.

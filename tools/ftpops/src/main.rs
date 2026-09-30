@@ -13,6 +13,7 @@ mod output;
 mod validate;
 
 use std::path::Path;
+use std::time::Duration;
 
 use clap::Parser;
 use ftp_utils_core::connection::{self, ConnectionArgs, EffectiveConnection};
@@ -81,6 +82,7 @@ fn connect(args: &ConnectionArgs, effective: &EffectiveConnection) -> Result<Sup
         &password,
         effective.ftps,
         effective.insecure_tls,
+        Duration::from_secs(effective.timeout_secs),
     )
     .map_err(|e| {
         eprintln!("Error: failed to connect to {}:{}: {e}", effective.host, effective.port);
