@@ -5,6 +5,7 @@ use std::io::{Read, Write};
 
 use suppaftp::list::ListParser;
 use suppaftp::native_tls::TlsConnector;
+use suppaftp::Status;
 use suppaftp::types::FileType;
 use suppaftp::{FtpStream, NativeTlsConnector, NativeTlsFtpStream};
 
@@ -13,15 +14,53 @@ use crate::remote::{FtpConnection, FtpConnectionError, RawRemoteEntry};
 /// Size of the buffer used when streaming downloads.
 const TRANSFER_CHUNK_SIZE: usize = 64 * 1024;
 
-/// A live FTP or FTPS connection. Kept as an enum (rather than a trait
-/// object) because `suppaftp`'s plain and TLS streams are distinct
-/// concrete types selected once at connect time.
-pub enum SuppaFtpConnection {
+/// Server-side hash commands probed by `try_hash`, in order of preference.
+const HASH_COMMANDS: [&str; 2] = ["XMD5", "MD5"];
+
+/// Length of an MD5 digest in hex characters.
+const MD5_HEX_LEN: usize = 32;
+
+/// `suppaftp`'s plain and TLS streams are distinct concrete types selected
+/// once at connect time, so they are kept in an enum (rather than a trait
+/// object).
+enum Stream {
     Plain(FtpStream),
     Tls(NativeTlsFtpStream),
 }
 
+/// What is known about the server's support for hash commands.
+#[derive(Clone, Copy)]
+enum HashSupport {
+    /// No hash command has been tried yet on this connection.
+    Unprobed,
+    /// This command worked earlier; use it directly.
+    Command(&'static str),
+    /// Every command failed once; don't try again (fall back to download).
+    Unsupported,
+}
+
+/// A live FTP or FTPS connection.
+pub struct SuppaFtpConnection {
+    stream: Stream,
+    hash_support: HashSupport,
+}
+
+/// Runs `$body` with `$stream` bound to the underlying suppaftp stream,
+/// whichever variant it is, so each operation is written once.
+macro_rules! with_stream {
+    ($conn:expr, $stream:ident => $body:expr) => {
+        match &mut $conn.stream {
+            Stream::Plain($stream) => $body,
+            Stream::Tls($stream) => $body,
+        }
+    };
+}
+
 impl SuppaFtpConnection {
+    fn new(stream: Stream) -> Self {
+        Self { stream, hash_support: HashSupport::Unprobed }
+    }
+
     /// Connects and authenticates. Uses explicit FTPS (AUTH TLS upgrade on
     /// the plain control channel) when `ftps` is true. Switches to binary
     /// (`TYPE I`) transfer mode, since the FTP default of ASCII mode
@@ -66,7 +105,7 @@ impl SuppaFtpConnection {
             stream
                 .transfer_type(FileType::Binary)
                 .map_err(|e| FtpConnectionError(e.to_string()))?;
-            Ok(SuppaFtpConnection::Tls(stream))
+            Ok(Self::new(Stream::Tls(stream)))
         } else {
             let mut stream =
                 FtpStream::connect(&address).map_err(|e| FtpConnectionError(e.to_string()))?;
@@ -76,22 +115,35 @@ impl SuppaFtpConnection {
             stream
                 .transfer_type(FileType::Binary)
                 .map_err(|e| FtpConnectionError(e.to_string()))?;
-            Ok(SuppaFtpConnection::Plain(stream))
+            Ok(Self::new(Stream::Plain(stream)))
         }
     }
 
     /// Sends QUIT and closes the connection. Errors are ignored: by the
     /// time this is called, the comparison has already finished.
-    pub fn close(self) {
-        match self {
-            SuppaFtpConnection::Plain(mut stream) => {
-                let _ = stream.quit();
-            }
-            SuppaFtpConnection::Tls(mut stream) => {
-                let _ = stream.quit();
-            }
-        }
+    pub fn close(mut self) {
+        let _ = with_stream!(self, stream => stream.quit());
     }
+
+    /// Sends one hash command (`XMD5 <path>` or `MD5 <path>`) and extracts
+    /// the digest from the reply, or `None` if the server rejects it or
+    /// replies with something that doesn't contain an MD5.
+    fn _send_hash_command(&mut self, command: &str, path: &str) -> Option<String> {
+        let expected = [Status::Unknown, Status::CommandOk, Status::File, Status::RequestedFileActionOk];
+        let response = with_stream!(self, stream => stream.custom_command(format!("{command} {path}"), &expected)).ok()?;
+        parse_hash_response(&response.as_string().ok()?)
+    }
+}
+
+/// Extracts an MD5 digest from a hash command reply such as
+/// `251 d41d8cd98f00b204e9800998ecf8427e` or `250 <md5> <path>`: the first
+/// whitespace-separated token that is exactly 32 hex digits, lowercased.
+/// Anything else (an error text, a different hash algorithm) is `None`.
+fn parse_hash_response(reply: &str) -> Option<String> {
+    reply
+        .split_whitespace()
+        .find(|token| token.len() == MD5_HEX_LEN && token.bytes().all(|b| b.is_ascii_hexdigit()))
+        .map(|token| token.to_ascii_lowercase())
 }
 
 /// Parses raw `LIST` output lines into entries. Blank lines and the
@@ -124,28 +176,38 @@ fn parse_listing(lines: &[String]) -> Result<Vec<RawRemoteEntry>, FtpConnectionE
 
 impl FtpConnection for SuppaFtpConnection {
     fn list_dir(&mut self, path: &str) -> Result<Vec<RawRemoteEntry>, FtpConnectionError> {
-        let lines = match self {
-            SuppaFtpConnection::Plain(stream) => stream.list(Some(path)),
-            SuppaFtpConnection::Tls(stream) => stream.list(Some(path)),
-        }
+        let lines = with_stream!(self, stream => stream.list(Some(path)))
         .map_err(|e| FtpConnectionError(e.to_string()))?;
 
         parse_listing(&lines)
     }
 
-    fn try_hash(&mut self, _path: &str) -> Option<String> {
-        // suppaftp (v10, as researched via its current docs) does not
-        // expose a public API for sending non-standard hash commands
-        // (XMD5/MD5/HASH). Always fall back to download + local MD5; see
-        // hash::apply_hash_comparison.
+    /// Asks the server for the file's MD5 with `XMD5`, then `MD5`. The
+    /// first command that works is remembered for the rest of the
+    /// connection; if none works, later calls return `None` immediately
+    /// (the caller then downloads and hashes locally).
+    fn try_hash(&mut self, path: &str) -> Option<String> {
+        let candidates: Vec<&'static str> = match self.hash_support {
+            HashSupport::Unsupported => return None,
+            HashSupport::Command(command) => vec![command],
+            HashSupport::Unprobed => HASH_COMMANDS.to_vec(),
+        };
+
+        for command in candidates {
+            if let Some(hash) = self._send_hash_command(command, path) {
+                self.hash_support = HashSupport::Command(command);
+                return Some(hash);
+            }
+        }
+
+        if matches!(self.hash_support, HashSupport::Unprobed) {
+            self.hash_support = HashSupport::Unsupported;
+        }
         None
     }
 
     fn retr_to_buffer(&mut self, path: &str) -> Result<Vec<u8>, FtpConnectionError> {
-        let cursor = match self {
-            SuppaFtpConnection::Plain(stream) => stream.retr_as_buffer(path),
-            SuppaFtpConnection::Tls(stream) => stream.retr_as_buffer(path),
-        }
+        let cursor = with_stream!(self, stream => stream.retr_as_buffer(path))
         .map_err(|e| FtpConnectionError(e.to_string()))?;
         Ok(cursor.into_inner())
     }
@@ -169,10 +231,7 @@ impl FtpConnection for SuppaFtpConnection {
                 total += n as u64;
             }
         };
-        let result = match self {
-            SuppaFtpConnection::Plain(stream) => stream.retr(path, copy),
-            SuppaFtpConnection::Tls(stream) => stream.retr(path, copy),
-        };
+        let result = with_stream!(self, stream => stream.retr(path, copy));
         match (result, write_error) {
             (_, Some(e)) => Err(FtpConnectionError(format!("cannot write downloaded data: {e}"))),
             (Ok(total), None) => Ok(total),
@@ -185,27 +244,18 @@ impl FtpConnection for SuppaFtpConnection {
     }
 
     fn store_from_reader(&mut self, path: &str, mut input: &mut dyn Read) -> Result<(), FtpConnectionError> {
-        match self {
-            SuppaFtpConnection::Plain(stream) => stream.put_file(path, &mut input),
-            SuppaFtpConnection::Tls(stream) => stream.put_file(path, &mut input),
-        }
+        with_stream!(self, stream => stream.put_file(path, &mut input))
         .map_err(|e| FtpConnectionError(e.to_string()))?;
         Ok(())
     }
 
     fn delete(&mut self, path: &str) -> Result<(), FtpConnectionError> {
-        match self {
-            SuppaFtpConnection::Plain(stream) => stream.rm(path),
-            SuppaFtpConnection::Tls(stream) => stream.rm(path),
-        }
+        with_stream!(self, stream => stream.rm(path))
         .map_err(|e| FtpConnectionError(e.to_string()))
     }
 
     fn create_dir(&mut self, path: &str) -> Result<(), FtpConnectionError> {
-        match self {
-            SuppaFtpConnection::Plain(stream) => stream.mkdir(path),
-            SuppaFtpConnection::Tls(stream) => stream.mkdir(path),
-        }
+        with_stream!(self, stream => stream.mkdir(path))
         .map_err(|e| FtpConnectionError(e.to_string()))
     }
 }
@@ -216,6 +266,23 @@ mod tests {
 
     fn lines(input: &[&str]) -> Vec<String> {
         input.iter().map(|l| l.to_string()).collect()
+    }
+
+    #[test]
+    fn parses_hash_from_typical_replies() {
+        let md5 = "d41d8cd98f00b204e9800998ecf8427e";
+
+        assert_eq!(parse_hash_response(&format!("251 {md5}")), Some(md5.to_string()));
+        assert_eq!(parse_hash_response(&format!("250 {} /a/b.txt", md5.to_uppercase())), Some(md5.to_string()));
+        assert_eq!(parse_hash_response(&format!("213 {md5}\r\n")), Some(md5.to_string()));
+    }
+
+    #[test]
+    fn rejects_replies_without_an_md5() {
+        assert_eq!(parse_hash_response("500 Unknown command"), None);
+        assert_eq!(parse_hash_response("250 da39a3ee5e6b4b0d3255bfef95601890afd80709"), None);
+        assert_eq!(parse_hash_response("251 zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"), None);
+        assert_eq!(parse_hash_response(""), None);
     }
 
     #[test]
