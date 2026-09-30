@@ -1,12 +1,17 @@
 //! Real `FtpConnection` implementation backed by the `suppaftp` crate,
 //! supporting both plain FTP and explicit FTPS (AUTH TLS).
 
+use std::io::{Read, Write};
+
 use suppaftp::list::ListParser;
 use suppaftp::native_tls::TlsConnector;
 use suppaftp::types::FileType;
 use suppaftp::{FtpStream, NativeTlsConnector, NativeTlsFtpStream};
 
 use crate::remote::{FtpConnection, FtpConnectionError, RawRemoteEntry};
+
+/// Size of the buffer used when streaming downloads.
+const TRANSFER_CHUNK_SIZE: usize = 64 * 1024;
 
 /// A live FTP or FTPS connection. Kept as an enum (rather than a trait
 /// object) because `suppaftp`'s plain and TLS streams are distinct
@@ -145,11 +150,44 @@ impl FtpConnection for SuppaFtpConnection {
         Ok(cursor.into_inner())
     }
 
+    fn retr_to_writer(&mut self, path: &str, out: &mut dyn Write) -> Result<u64, FtpConnectionError> {
+        // Distinguish a failure writing to `out` (e.g. disk full) from a
+        // network/protocol failure, since suppaftp reports both alike.
+        let mut write_error: Option<std::io::Error> = None;
+        let copy = |reader: &mut dyn Read| -> Result<u64, suppaftp::FtpError> {
+            let mut buf = [0u8; TRANSFER_CHUNK_SIZE];
+            let mut total = 0u64;
+            loop {
+                let n = reader.read(&mut buf).map_err(suppaftp::FtpError::ConnectionError)?;
+                if n == 0 {
+                    return Ok(total);
+                }
+                if let Err(e) = out.write_all(&buf[..n]) {
+                    write_error = Some(e);
+                    return Err(suppaftp::FtpError::BadResponse);
+                }
+                total += n as u64;
+            }
+        };
+        let result = match self {
+            SuppaFtpConnection::Plain(stream) => stream.retr(path, copy),
+            SuppaFtpConnection::Tls(stream) => stream.retr(path, copy),
+        };
+        match (result, write_error) {
+            (_, Some(e)) => Err(FtpConnectionError(format!("cannot write downloaded data: {e}"))),
+            (Ok(total), None) => Ok(total),
+            (Err(e), None) => Err(FtpConnectionError(e.to_string())),
+        }
+    }
+
     fn store_from_buffer(&mut self, path: &str, data: &[u8]) -> Result<(), FtpConnectionError> {
-        let mut reader = std::io::Cursor::new(data);
+        self.store_from_reader(path, &mut std::io::Cursor::new(data))
+    }
+
+    fn store_from_reader(&mut self, path: &str, mut input: &mut dyn Read) -> Result<(), FtpConnectionError> {
         match self {
-            SuppaFtpConnection::Plain(stream) => stream.put_file(path, &mut reader),
-            SuppaFtpConnection::Tls(stream) => stream.put_file(path, &mut reader),
+            SuppaFtpConnection::Plain(stream) => stream.put_file(path, &mut input),
+            SuppaFtpConnection::Tls(stream) => stream.put_file(path, &mut input),
         }
         .map_err(|e| FtpConnectionError(e.to_string()))?;
         Ok(())

@@ -43,11 +43,11 @@ pub fn copy_to_local<C: FtpConnection>(
 
             let remote_path = format!("{remote_dir}/{}", row.relative_path);
             let outcome = (|| -> Result<(), String> {
-                let data = conn.retr_to_buffer(&remote_path).map_err(|e| e.to_string())?;
                 if let Some(parent) = local_path.parent() {
                     std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
                 }
-                std::fs::write(&local_path, data).map_err(|e| e.to_string())?;
+                let mut file = std::fs::File::create(&local_path).map_err(|e| e.to_string())?;
+                conn.retr_to_writer(&remote_path, &mut file).map_err(|e| e.to_string())?;
                 Ok(())
             })();
 
@@ -91,8 +91,8 @@ pub fn copy_to_remote<C: FtpConnection>(
                 return Ok(OpOutcome::Skipped);
             }
 
-            let data = std::fs::read(&local_path).map_err(|e| e.to_string())?;
-            conn.store_from_buffer(&remote_path, &data).map_err(|e| e.to_string())?;
+            let mut file = std::fs::File::open(&local_path).map_err(|e| e.to_string())?;
+            conn.store_from_reader(&remote_path, &mut file).map_err(|e| e.to_string())?;
             Ok(OpOutcome::Copied)
         })();
 

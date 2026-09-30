@@ -2,6 +2,7 @@
 //! comparison logic never depends directly on a concrete FTP library.
 
 use std::collections::HashSet;
+use std::io::{Read, Write};
 
 use crate::exclude::is_excluded;
 
@@ -43,8 +44,25 @@ pub trait FtpConnection {
     fn try_hash(&mut self, path: &str) -> Option<String>;
     /// Downloads the full contents of `path` into memory.
     fn retr_to_buffer(&mut self, path: &str) -> Result<Vec<u8>, FtpConnectionError>;
+    /// Downloads `path` into `out`, returning the number of bytes written.
+    /// The default goes through `retr_to_buffer`; real clients should
+    /// override it to stream, so large files never sit fully in memory.
+    fn retr_to_writer(&mut self, path: &str, out: &mut dyn Write) -> Result<u64, FtpConnectionError> {
+        let data = self.retr_to_buffer(path)?;
+        out.write_all(&data).map_err(|e| FtpConnectionError(format!("write error: {e}")))?;
+        Ok(data.len() as u64)
+    }
     /// Uploads `data` to `path`, overwriting any existing remote file.
     fn store_from_buffer(&mut self, path: &str, data: &[u8]) -> Result<(), FtpConnectionError>;
+    /// Uploads everything `input` yields to `path`, overwriting any
+    /// existing remote file. The default reads it all into memory and
+    /// calls `store_from_buffer`; real clients should override it to
+    /// stream.
+    fn store_from_reader(&mut self, path: &str, input: &mut dyn Read) -> Result<(), FtpConnectionError> {
+        let mut data = Vec::new();
+        input.read_to_end(&mut data).map_err(|e| FtpConnectionError(format!("read error: {e}")))?;
+        self.store_from_buffer(path, &data)
+    }
     /// Deletes the remote file at `path`.
     fn delete(&mut self, path: &str) -> Result<(), FtpConnectionError>;
     /// Creates a single directory at `path`. Its parent must already exist.

@@ -8,7 +8,29 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use crate::diff::{DiffEntry, DiffStatus};
-use crate::remote::FtpConnection;
+use crate::remote::{FtpConnection, FtpConnectionError};
+
+/// Computes the MD5 of the local file at `path` as lowercase hex, reading
+/// it in chunks so memory use doesn't depend on the file size.
+pub fn local_md5(path: &Path) -> std::io::Result<String> {
+    let mut file = std::fs::File::open(path)?;
+    let mut context = md5::Context::new();
+    std::io::copy(&mut file, &mut context)?;
+    Ok(format!("{:x}", context.compute()))
+}
+
+/// Resolves the MD5 of the remote file at `path` as lowercase hex: the
+/// server-computed hash when `try_hash` provides one, otherwise a
+/// streamed download hashed on the fly (never held fully in memory).
+pub fn remote_md5<C: FtpConnection>(conn: &mut C, path: &str) -> Result<String, FtpConnectionError> {
+    if let Some(hash) = conn.try_hash(path) {
+        return Ok(hash);
+    }
+
+    let mut context = md5::Context::new();
+    conn.retr_to_writer(path, &mut context)?;
+    Ok(format!("{:x}", context.compute()))
+}
 
 /// For every entry currently marked `Match`, resolves and compares each
 /// side's MD5 hash, updating `status` to `Match` or `HashMismatch` (only
@@ -47,15 +69,9 @@ pub fn apply_hash_comparison<C: FtpConnection>(
             Some(md5.clone())
         } else if let (Some(conn), Some(remote_root)) = (conn.as_deref_mut(), remote_root) {
             let remote_path = format!("{remote_root}/{}", entry.relative_path);
-            match conn.try_hash(&remote_path) {
-                Some(hash) => Some(hash),
-                None => {
-                    let bytes = conn
-                        .retr_to_buffer(&remote_path)
-                        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
-                    Some(format!("{:x}", md5::compute(&bytes)))
-                }
-            }
+            let hash = remote_md5(conn, &remote_path)
+                .map_err(|e| std::io::Error::other(format!("{}: {e}", entry.relative_path)))?;
+            Some(hash)
         } else {
             None
         };
@@ -63,9 +79,9 @@ pub fn apply_hash_comparison<C: FtpConnection>(
         let local_md5 = if let Some(md5) = local_known_md5.get(&entry.relative_path) {
             Some(md5.clone())
         } else if let Some(local_root) = local_root {
-            let local_path = local_root.join(&entry.relative_path);
-            let bytes = std::fs::read(&local_path)?;
-            Some(format!("{:x}", md5::compute(&bytes)))
+            let hash = local_md5(&local_root.join(&entry.relative_path))
+                .map_err(|e| std::io::Error::new(e.kind(), format!("{}: {e}", entry.relative_path)))?;
+            Some(hash)
         } else {
             None
         };
@@ -125,6 +141,54 @@ mod tests {
             local_md5: None,
             remote_md5: None,
         }
+    }
+
+    #[test]
+    fn local_md5_matches_in_memory_md5_for_large_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("big.bin");
+        let data: Vec<u8> = (0..300_000u32).map(|i| (i % 251) as u8).collect();
+        std::fs::write(&path, &data).unwrap();
+
+        assert_eq!(local_md5(&path).unwrap(), format!("{:x}", md5::compute(&data)));
+    }
+
+    #[test]
+    fn local_md5_reports_missing_file() {
+        assert!(local_md5(Path::new("/nonexistent/file")).is_err());
+    }
+
+    #[test]
+    fn remote_md5_hashes_streamed_download_when_server_hash_missing() {
+        let mut conn = MockConnection { hash: None, remote_bytes: b"hello".to_vec() };
+
+        assert_eq!(remote_md5(&mut conn, "/r/f.txt").unwrap(), format!("{:x}", md5::compute(b"hello")));
+    }
+
+    #[test]
+    fn remote_md5_prefers_server_hash() {
+        let mut conn = MockConnection { hash: Some("server-hash".to_string()), remote_bytes: b"x".to_vec() };
+
+        assert_eq!(remote_md5(&mut conn, "/r/f.txt").unwrap(), "server-hash");
+    }
+
+    #[test]
+    fn hash_error_names_the_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut entries = vec![entry("missing.txt")];
+
+        let err = apply_hash_comparison::<MockConnection>(
+            None,
+            None,
+            Some(dir.path()),
+            &HashMap::new(),
+            &HashMap::new(),
+            &mut entries,
+            None,
+        )
+        .unwrap_err();
+
+        assert!(err.to_string().contains("missing.txt"), "{err}");
     }
 
     #[test]

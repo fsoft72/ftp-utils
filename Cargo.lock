@@ -269,7 +269,6 @@ dependencies = [
  "colored",
  "csv",
  "ftp-utils-core",
- "md5",
  "rpassword",
  "serde",
  "serde_json",

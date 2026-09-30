@@ -15,7 +15,7 @@
 
 - [x] **Destructive `delete` has no confirmation and trusts a possibly stale CSV** - `ftpops delete` acts immediately on rows from a report that may be days old, without re-checking that the file still has the recorded status. Add an interactive confirmation (with a `--yes` flag for scripts) and print the count and target before deleting.
   - File(s): `tools/ftpops/src/main.rs`
-- [ ] **Stream transfers and hashes instead of buffering whole files** - `retr_to_buffer`, `store_from_buffer`, `std::fs::read` + `md5::compute` load each file completely into memory, so a multi-GB file exhausts RAM. Use `md5::Context` with chunked reads locally, and stream remote downloads/uploads (`retr` with a reader, `put_file` from a `File`).
+- [x] **Stream transfers and hashes instead of buffering whole files** - `retr_to_buffer`, `store_from_buffer`, `std::fs::read` + `md5::compute` load each file completely into memory, so a multi-GB file exhausts RAM. Use `md5::Context` with chunked reads locally, and stream remote downloads/uploads (`retr` with a reader, `put_file` from a `File`).
   - File(s): `crates/ftp-utils-core/src/hash.rs`, `crates/ftp-utils-core/src/ftp_client.rs`, `crates/ftp-utils-core/src/remote.rs`, `tools/ftpops/src/ops.rs`, `tools/ftpdiff/src/main.rs`
 - [ ] **`try_hash` is a stub, every remote hash downloads the whole file** - the trait method always returns `None`, so `--hash` re-downloads every size-matching file. Implement `XMD5`/`MD5`/`XSHA`-style commands via suppaftp's custom command support (or remove the method and document the download cost) and cache the capability probe per connection.
   - File(s): `crates/ftp-utils-core/src/ftp_client.rs`, `crates/ftp-utils-core/src/remote.rs`

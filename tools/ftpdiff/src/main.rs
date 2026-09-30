@@ -14,7 +14,7 @@ use std::collections::HashMap;
 use clap::Parser;
 use ftp_utils_core::compare::compare_entries;
 use ftp_utils_core::ftp_client::SuppaFtpConnection;
-use ftp_utils_core::{csv_source, exclude, hash, local, remote, DiffStatus, FtpConnection};
+use ftp_utils_core::{csv_source, exclude, hash, local, remote, DiffStatus};
 
 use cli::Cli;
 use config::{LocalSource, RemoteSource};
@@ -221,14 +221,13 @@ fn run_build(cli: &Cli, json_config: &config::JsonConfig) -> i32 {
             let mut out = Vec::new();
             for item in scanned {
                 let local_md5 = if build.hash {
-                    let bytes = match std::fs::read(dir.join(&item.relative_path)) {
-                        Ok(b) => b,
+                    match hash::local_md5(&dir.join(&item.relative_path)) {
+                        Ok(md5) => Some(md5),
                         Err(err) => {
                             eprintln!("Error: failed to read {} for hashing: {err}", item.relative_path);
                             return 2;
                         }
-                    };
-                    Some(format!("{:x}", md5::compute(&bytes)))
+                    }
                 } else {
                     None
                 };
@@ -277,15 +276,12 @@ fn run_build(cli: &Cli, json_config: &config::JsonConfig) -> i32 {
             for item in scanned {
                 let remote_md5 = if build.hash {
                     let remote_path = format!("{remote_dir}/{}", item.relative_path);
-                    match conn.try_hash(&remote_path) {
-                        Some(hash) => Some(hash),
-                        None => match conn.retr_to_buffer(&remote_path) {
-                            Ok(bytes) => Some(format!("{:x}", md5::compute(&bytes))),
-                            Err(err) => {
-                                eprintln!("Error: failed to download {} for hashing: {err}", item.relative_path);
-                                return 2;
-                            }
-                        },
+                    match hash::remote_md5(&mut conn, &remote_path) {
+                        Ok(md5) => Some(md5),
+                        Err(err) => {
+                            eprintln!("Error: failed to hash {}: {err}", item.relative_path);
+                            return 2;
+                        }
                     }
                 } else {
                     None
