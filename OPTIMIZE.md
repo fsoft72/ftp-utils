@@ -44,7 +44,7 @@
   - File(s): `tools/ftpdiff/src/config.rs`, `crates/ftp-utils-core/src/connection.rs`
 - [ ] **`DiffEntry` construction repeated four times** - `compare_entries` builds nearly identical literals with `None` md5 fields for each case, and tests do the same. Add `DiffEntry::new(path, status, local_size, remote_size)` (or per-status constructors).
   - File(s): `crates/ftp-utils-core/src/compare.rs`, `crates/ftp-utils-core/src/diff.rs`, `tools/ftpdiff/src/main.rs`
-- [ ] **FTPS and plain connect branches are copy-pasted** - the two arms of `SuppaFtpConnection::connect` (login, `transfer_type`) and every `match self { Plain(..) => .., Tls(..) => .. }` in the trait impl duplicate code. Use a small macro or a helper that dispatches on the enum once.
+- [x] **FTPS and plain connect branches are copy-pasted** - the two arms of `SuppaFtpConnection::connect` (login, `transfer_type`) and every `match self { Plain(..) => .., Tls(..) => .. }` in the trait impl duplicate code. Use a small macro or a helper that dispatches on the enum once.
   - File(s): `crates/ftp-utils-core/src/ftp_client.rs`
 - [ ] **No connect/read timeouts** - `FtpStream::connect` blocks indefinitely on a dead host or stalled transfer. Use `connect_timeout` and set read/write timeouts on the control and data channels, exposed as a `--timeout` option.
   - File(s): `crates/ftp-utils-core/src/ftp_client.rs`, `crates/ftp-utils-core/src/connection.rs`

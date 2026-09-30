@@ -7,12 +7,28 @@ use suppaftp::list::ListParser;
 use suppaftp::native_tls::TlsConnector;
 use suppaftp::Status;
 use suppaftp::types::FileType;
-use suppaftp::{FtpStream, NativeTlsConnector, NativeTlsFtpStream};
+use suppaftp::{FtpStream, ImplFtpStream, NativeTlsConnector, NativeTlsFtpStream, TlsStream};
 
 use crate::remote::{FtpConnection, FtpConnectionError, RawRemoteEntry};
 
 /// Size of the buffer used when streaming downloads.
 const TRANSFER_CHUNK_SIZE: usize = 64 * 1024;
+
+/// Converts a suppaftp error into this crate's error type.
+fn _ftp_error(e: suppaftp::FtpError) -> FtpConnectionError {
+    FtpConnectionError(e.to_string())
+}
+
+/// Logs in and switches to binary transfer mode; shared by the plain and
+/// TLS connect paths, which differ only in the stream type.
+fn _login_binary<T: TlsStream>(
+    stream: &mut ImplFtpStream<T>,
+    user: &str,
+    password: &str,
+) -> Result<(), FtpConnectionError> {
+    stream.login(user, password).map_err(_ftp_error)?;
+    stream.transfer_type(FileType::Binary).map_err(_ftp_error)
+}
 
 /// Server-side hash commands probed by `try_hash`, in order of preference.
 const HASH_COMMANDS: [&str; 2] = ["XMD5", "MD5"];
@@ -84,39 +100,25 @@ impl SuppaFtpConnection {
     ) -> Result<Self, FtpConnectionError> {
         let address = format!("{host}:{port}");
 
-        if ftps {
-            let stream = NativeTlsFtpStream::connect(&address)
-                .map_err(|e| FtpConnectionError(e.to_string()))?;
-            let mut connector_builder = TlsConnector::builder();
-            if insecure_tls {
-                connector_builder
-                    .danger_accept_invalid_certs(true)
-                    .danger_accept_invalid_hostnames(true);
-            }
-            let connector = connector_builder
-                .build()
-                .map_err(|e| FtpConnectionError(e.to_string()))?;
-            let mut stream = stream
-                .into_secure(NativeTlsConnector::from(connector), host)
-                .map_err(|e| FtpConnectionError(e.to_string()))?;
-            stream
-                .login(user, password)
-                .map_err(|e| FtpConnectionError(e.to_string()))?;
-            stream
-                .transfer_type(FileType::Binary)
-                .map_err(|e| FtpConnectionError(e.to_string()))?;
-            Ok(Self::new(Stream::Tls(stream)))
-        } else {
-            let mut stream =
-                FtpStream::connect(&address).map_err(|e| FtpConnectionError(e.to_string()))?;
-            stream
-                .login(user, password)
-                .map_err(|e| FtpConnectionError(e.to_string()))?;
-            stream
-                .transfer_type(FileType::Binary)
-                .map_err(|e| FtpConnectionError(e.to_string()))?;
-            Ok(Self::new(Stream::Plain(stream)))
+        if !ftps {
+            let mut stream = FtpStream::connect(&address).map_err(_ftp_error)?;
+            _login_binary(&mut stream, user, password)?;
+            return Ok(Self::new(Stream::Plain(stream)));
         }
+
+        let stream = NativeTlsFtpStream::connect(&address).map_err(_ftp_error)?;
+        let mut connector_builder = TlsConnector::builder();
+        if insecure_tls {
+            connector_builder
+                .danger_accept_invalid_certs(true)
+                .danger_accept_invalid_hostnames(true);
+        }
+        let connector = connector_builder.build().map_err(|e| FtpConnectionError(e.to_string()))?;
+        let mut stream = stream
+            .into_secure(NativeTlsConnector::from(connector), host)
+            .map_err(_ftp_error)?;
+        _login_binary(&mut stream, user, password)?;
+        Ok(Self::new(Stream::Tls(stream)))
     }
 
     /// Sends QUIT and closes the connection. Errors are ignored: by the
