@@ -100,3 +100,4 @@
   `--hash`, round-tripping the output back in as `--local-csv`+
   `--remote-csv`, and both error paths (missing `--csv`, both sides
   given).
+- Added `OPTIMIZE.md`: prioritized code review TODO list (security, performance, refactoring).
