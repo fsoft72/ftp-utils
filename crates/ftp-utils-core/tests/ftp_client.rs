@@ -116,7 +116,11 @@ fn serve(control: TcpStream, state: Shared) -> std::io::Result<()> {
                         out.push_str(&format!("drwxr-xr-x 2 user group 4096 Jan 10 12:00 {}\r\n", name_of(dir)));
                     }
                     for (file, bytes) in state.files.iter().filter(|(f, _)| parent_of(f) == argument) {
-                        out.push_str(&format!("-rw-r--r-- 1 user group {} Jan 10 12:00 {}\r\n", bytes.len(), name_of(file)));
+                        out.push_str(&format!(
+                            "-rw-r--r-- 1 user group {} Jan 10 12:00 {}\r\n",
+                            bytes.len(),
+                            name_of(file)
+                        ));
                     }
                     out
                 };
@@ -163,7 +167,8 @@ fn serve(control: TcpStream, state: Shared) -> std::io::Result<()> {
             "XMD5" | "MD5" => {
                 let mut state = state.lock().unwrap();
                 state.hash_requests.push(verb.to_ascii_uppercase());
-                let supported = state.hash_command == Some(if verb.eq_ignore_ascii_case("XMD5") { "XMD5" } else { "MD5" });
+                let supported =
+                    state.hash_command == Some(if verb.eq_ignore_ascii_case("XMD5") { "XMD5" } else { "MD5" });
                 match (supported, state.files.get(argument)) {
                     (true, Some(content)) => {
                         let hash = format!("{:x}", md5::compute(content));

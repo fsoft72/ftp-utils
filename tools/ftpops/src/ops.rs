@@ -8,7 +8,6 @@ use ftp_utils_core::csv_source::StatusRow;
 use ftp_utils_core::remote::join_remote;
 use ftp_utils_core::FtpConnection;
 
-
 /// What happened to one file.
 #[derive(Debug, Clone, PartialEq)]
 pub enum OpOutcome {
@@ -141,9 +140,7 @@ fn _remote_file_exists<C: FtpConnection>(
     let parent = if parent.is_empty() { "/" } else { parent };
 
     if !listed.contains_key(parent) {
-        let entries = conn
-            .list_dir(parent)
-            .map_err(|e| format!("cannot check existing file: {e}"))?;
+        let entries = conn.list_dir(parent).map_err(|e| format!("cannot check existing file: {e}"))?;
         let files = entries.into_iter().filter(|e| !e.is_dir).map(|e| e.name).collect();
         listed.insert(parent.to_string(), files);
     }
@@ -188,13 +185,16 @@ pub fn delete_local(local_dir: &Path, rows: &[&StatusRow]) -> Vec<OpResult> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     use ftp_utils_core::csv_source::ReportStatus;
     use ftp_utils_core::remote::RawRemoteEntry;
     use ftp_utils_core::testing::MockFtpConnection;
 
     fn row(relative_path: &str) -> StatusRow {
-        StatusRow { relative_path: relative_path.to_string(), status: ReportStatus::Diff(ftp_utils_core::DiffStatus::RemoteOnly) }
+        StatusRow {
+            relative_path: relative_path.to_string(),
+            status: ReportStatus::Diff(ftp_utils_core::DiffStatus::RemoteOnly),
+        }
     }
 
     #[test]
@@ -203,7 +203,7 @@ mod tests {
         let mut conn = MockFtpConnection::default();
         conn.files.insert("/remote/sub/file.txt".to_string(), b"hello".to_vec());
 
-        let rows = vec![row("sub/file.txt")];
+        let rows = [row("sub/file.txt")];
         let refs: Vec<&StatusRow> = rows.iter().collect();
 
         let results = copy_to_local(&mut conn, "/remote", dir.path(), &refs, false);
@@ -220,7 +220,7 @@ mod tests {
         let mut conn = MockFtpConnection::default();
         conn.files.insert("/remote/file.txt".to_string(), b"new content".to_vec());
 
-        let rows = vec![row("file.txt")];
+        let rows = [row("file.txt")];
         let refs: Vec<&StatusRow> = rows.iter().collect();
 
         let results = copy_to_local(&mut conn, "/remote", dir.path(), &refs, true);
@@ -236,7 +236,7 @@ mod tests {
         std::fs::write(dir.path().join("file.txt"), b"previous content").unwrap();
         let mut conn = MockFtpConnection::default(); // remote file is missing: download fails
 
-        let rows = vec![row("file.txt")];
+        let rows = [row("file.txt")];
         let refs: Vec<&StatusRow> = rows.iter().collect();
 
         let results = copy_to_local(&mut conn, "/remote", dir.path(), &refs, false);
@@ -254,7 +254,7 @@ mod tests {
         let mut conn = MockFtpConnection::default();
         conn.files.insert("/remote/file.txt".to_string(), b"new".to_vec());
 
-        let rows = vec![row("file.txt")];
+        let rows = [row("file.txt")];
         let refs: Vec<&StatusRow> = rows.iter().collect();
 
         copy_to_local(&mut conn, "/remote", dir.path(), &refs, false);
@@ -268,7 +268,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let mut conn = MockFtpConnection::default();
 
-        let rows = vec![row("missing.txt")];
+        let rows = [row("missing.txt")];
         let refs: Vec<&StatusRow> = rows.iter().collect();
 
         let results = copy_to_local(&mut conn, "/remote", dir.path(), &refs, false);
@@ -285,7 +285,7 @@ mod tests {
         let mut conn = MockFtpConnection::default();
         conn.listings.insert("/".to_string(), vec![]);
 
-        let rows = vec![row("sub/file.txt")];
+        let rows = [row("sub/file.txt")];
         let refs: Vec<&StatusRow> = rows.iter().collect();
 
         let results = copy_to_remote(&mut conn, "/remote", dir.path(), &refs, false);
@@ -300,9 +300,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("file.txt"), b"local content").unwrap();
         let mut conn = MockFtpConnection::default();
-        conn.listings.insert("/remote".to_string(), vec![RawRemoteEntry { name: "file.txt".into(), is_dir: false, size: 5 }]);
+        conn.listings
+            .insert("/remote".to_string(), vec![RawRemoteEntry { name: "file.txt".into(), is_dir: false, size: 5 }]);
 
-        let rows = vec![row("file.txt")];
+        let rows = [row("file.txt")];
         let refs: Vec<&StatusRow> = rows.iter().collect();
 
         let results = copy_to_remote(&mut conn, "/remote", dir.path(), &refs, true);
@@ -317,7 +318,7 @@ mod tests {
         std::fs::write(dir.path().join("file.txt"), b"local content").unwrap();
         let mut conn = MockFtpConnection { fail_listings: true, ..MockFtpConnection::default() };
 
-        let rows = vec![row("file.txt")];
+        let rows = [row("file.txt")];
         let refs: Vec<&StatusRow> = rows.iter().collect();
 
         let results = copy_to_remote(&mut conn, "/remote", dir.path(), &refs, true);
@@ -336,7 +337,7 @@ mod tests {
         let mut conn = MockFtpConnection::default();
         conn.listings.insert("/".to_string(), vec![]);
 
-        let rows = vec![row("sub/a.txt"), row("sub/b.txt"), row("sub/c.txt")];
+        let rows = [row("sub/a.txt"), row("sub/b.txt"), row("sub/c.txt")];
         let refs: Vec<&StatusRow> = rows.iter().collect();
 
         let results = copy_to_remote(&mut conn, "/remote", dir.path(), &refs, true);
@@ -353,7 +354,7 @@ mod tests {
     fn delete_remote_calls_delete_with_full_path() {
         let mut conn = MockFtpConnection::default();
 
-        let rows = vec![row("a.txt"), row("sub/b.txt")];
+        let rows = [row("a.txt"), row("sub/b.txt")];
         let refs: Vec<&StatusRow> = rows.iter().collect();
 
         let results = delete_remote(&mut conn, "/remote", &refs);
@@ -373,7 +374,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("a.txt"), b"x").unwrap();
 
-        let rows = vec![row("a.txt")];
+        let rows = [row("a.txt")];
         let refs: Vec<&StatusRow> = rows.iter().collect();
 
         let results = delete_local(dir.path(), &refs);
@@ -386,7 +387,7 @@ mod tests {
     fn delete_local_reports_failure_for_missing_file() {
         let dir = tempfile::tempdir().unwrap();
 
-        let rows = vec![row("missing.txt")];
+        let rows = [row("missing.txt")];
         let refs: Vec<&StatusRow> = rows.iter().collect();
 
         let results = delete_local(dir.path(), &refs);

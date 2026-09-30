@@ -132,18 +132,11 @@ pub fn walk_remote<C: FtpConnection>(
     let mut dirs_to_visit: Vec<String> = vec![String::new()]; // "" means root itself
 
     while let Some(relative_dir) = dirs_to_visit.pop() {
-        let full_path = if relative_dir.is_empty() {
-            root.to_string()
-        } else {
-            join_remote(root, &relative_dir)
-        };
+        let full_path = if relative_dir.is_empty() { root.to_string() } else { join_remote(root, &relative_dir) };
 
         for item in conn.list_dir(&full_path)? {
-            let relative_path = if relative_dir.is_empty() {
-                item.name.clone()
-            } else {
-                format!("{relative_dir}/{}", item.name)
-            };
+            let relative_path =
+                if relative_dir.is_empty() { item.name.clone() } else { format!("{relative_dir}/{}", item.name) };
 
             if item.is_dir {
                 if !excludes.excludes_dir(&relative_path) {
@@ -210,10 +203,8 @@ mod tests {
                 RawRemoteEntry { name: "sub".into(), is_dir: true, size: 0 },
             ],
         );
-        listings.insert(
-            "/remote/sub".to_string(),
-            vec![RawRemoteEntry { name: "b.txt".into(), is_dir: false, size: 20 }],
-        );
+        listings
+            .insert("/remote/sub".to_string(), vec![RawRemoteEntry { name: "b.txt".into(), is_dir: false, size: 20 }]);
         let mut conn = mock(listings);
 
         let mut entries = walk_remote(&mut conn, "/remote", &ExcludeSet::default(), None).unwrap();
@@ -260,7 +251,8 @@ mod tests {
         );
         let mut conn = mock(listings);
 
-        let entries = walk_remote(&mut conn, "/remote", &ExcludeSet::new(&["*.tmp".to_string()]).unwrap(), None).unwrap();
+        let entries =
+            walk_remote(&mut conn, "/remote", &ExcludeSet::new(&["*.tmp".to_string()]).unwrap(), None).unwrap();
 
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].relative_path, "keep.txt");
@@ -281,7 +273,8 @@ mod tests {
         let mut messages = Vec::new();
         let mut progress = |msg: &str| messages.push(msg.to_string());
 
-        walk_remote(&mut conn, "/remote", &ExcludeSet::new(&["*.tmp".to_string()]).unwrap(), Some(&mut progress)).unwrap();
+        walk_remote(&mut conn, "/remote", &ExcludeSet::new(&["*.tmp".to_string()]).unwrap(), Some(&mut progress))
+            .unwrap();
 
         assert_eq!(messages, vec!["remote: keep.txt".to_string()]);
     }

@@ -81,10 +81,11 @@ impl FtpConnection for MockFtpConnection {
         let (parent, name) = path.rsplit_once('/').unwrap_or(("", path));
         let parent = if parent.is_empty() { "/" } else { parent };
 
-        self.listings
-            .entry(parent.to_string())
-            .or_default()
-            .push(RawRemoteEntry { name: name.to_string(), is_dir: true, size: 0 });
+        self.listings.entry(parent.to_string()).or_default().push(RawRemoteEntry {
+            name: name.to_string(),
+            is_dir: true,
+            size: 0,
+        });
         self.listings.entry(path.to_string()).or_default();
 
         Ok(())

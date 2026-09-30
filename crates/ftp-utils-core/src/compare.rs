@@ -11,16 +11,11 @@ use crate::remote::RemoteEntry;
 /// side. Does not consider hashes; see `hash::apply_hash_comparison` for
 /// the optional hash-based upgrade pass.
 pub fn compare_entries(local: &[LocalEntry], remote: &[RemoteEntry]) -> Vec<DiffEntry> {
-    let mut local_by_path: HashMap<&str, &LocalEntry> =
-        local.iter().map(|e| (e.relative_path.as_str(), e)).collect();
+    let mut local_by_path: HashMap<&str, &LocalEntry> = local.iter().map(|e| (e.relative_path.as_str(), e)).collect();
     let mut remote_by_path: HashMap<&str, &RemoteEntry> =
         remote.iter().map(|e| (e.relative_path.as_str(), e)).collect();
 
-    let mut all_paths: Vec<&str> = local_by_path
-        .keys()
-        .chain(remote_by_path.keys())
-        .copied()
-        .collect();
+    let mut all_paths: Vec<&str> = local_by_path.keys().chain(remote_by_path.keys()).copied().collect();
     all_paths.sort_unstable();
     all_paths.dedup();
 

@@ -7,11 +7,7 @@ use std::process::{Command, Output};
 const HEADER: &str = "path,status,local_size,remote_size,local_md5,remote_md5\n";
 
 fn ftpdiff(args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_ftpdiff"))
-        .args(args)
-        .env("NO_COLOR", "1")
-        .output()
-        .expect("failed to run ftpdiff")
+    Command::new(env!("CARGO_BIN_EXE_ftpdiff")).args(args).env("NO_COLOR", "1").output().expect("failed to run ftpdiff")
 }
 
 fn stdout(output: &Output) -> String {
@@ -51,11 +47,7 @@ fn differences_exit_one_and_write_a_report() {
     write(&local, &format!("{HEADER}a.txt,Scan,5,,,\nonly-local.txt,Scan,1,,,\n"));
     write(&remote, &format!("{HEADER}a.txt,Scan,,7,,\nonly-remote.txt,Scan,,2,,\n"));
 
-    let output = ftpdiff(&[
-        "--local-csv", str_of(&local),
-        "--remote-csv", str_of(&remote),
-        "--csv", str_of(&out),
-    ]);
+    let output = ftpdiff(&["--local-csv", str_of(&local), "--remote-csv", str_of(&remote), "--csv", str_of(&out)]);
 
     assert_eq!(output.status.code(), Some(1), "{}", stderr(&output));
     let report = std::fs::read_to_string(&out).unwrap();
@@ -70,11 +62,7 @@ fn exclude_patterns_remove_entries_from_csv_sources() {
     let report = dir.path().join("report.csv");
     write(&report, &format!("{HEADER}a.txt,Scan,5,5,,\nnoise.tmp,Scan,1,,,\n"));
 
-    let output = ftpdiff(&[
-        "--local-csv", str_of(&report),
-        "--remote-csv", str_of(&report),
-        "--exclude", "*.tmp",
-    ]);
+    let output = ftpdiff(&["--local-csv", str_of(&report), "--remote-csv", str_of(&report), "--exclude", "*.tmp"]);
 
     assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
     assert!(stdout(&output).contains("1 matched"), "{}", stdout(&output));
@@ -94,11 +82,7 @@ fn invalid_exclude_pattern_exits_two() {
     let report = dir.path().join("report.csv");
     write(&report, HEADER);
 
-    let output = ftpdiff(&[
-        "--local-csv", str_of(&report),
-        "--remote-csv", str_of(&report),
-        "--exclude", "[unclosed",
-    ]);
+    let output = ftpdiff(&["--local-csv", str_of(&report), "--remote-csv", str_of(&report), "--exclude", "[unclosed"]);
 
     assert_eq!(output.status.code(), Some(2));
     assert!(stderr(&output).contains("[unclosed"), "{}", stderr(&output));
@@ -134,11 +118,7 @@ fn build_scans_a_local_directory_into_a_csv_that_can_be_compared() {
 
     // The snapshot is a valid source: comparing the live tree against it as
     // the "local" side of itself matches everything, hashes included.
-    let compared = ftpdiff(&[
-        "--local-dir", str_of(&tree),
-        "--remote-csv", str_of(&snapshot),
-        "--hash",
-    ]);
+    let compared = ftpdiff(&["--local-dir", str_of(&tree), "--remote-csv", str_of(&snapshot), "--hash"]);
     // remote side of the snapshot has no remote_size (it was a local scan),
     // so every file is reported as local-only.
     assert_eq!(compared.status.code(), Some(1), "{}", stderr(&compared));

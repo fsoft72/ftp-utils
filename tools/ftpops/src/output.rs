@@ -43,10 +43,7 @@ pub fn summarize(results: &[OpResult]) -> Summary {
 
 /// Formats a one-line summary of the tallies.
 pub fn format_summary(summary: &Summary) -> String {
-    format!(
-        "Summary: {} succeeded, {} skipped, {} failed",
-        summary.succeeded, summary.skipped, summary.failed
-    )
+    format!("Summary: {} succeeded, {} skipped, {} failed", summary.succeeded, summary.skipped, summary.failed)
 }
 
 #[cfg(test)]

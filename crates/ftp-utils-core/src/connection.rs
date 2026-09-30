@@ -105,8 +105,7 @@ crate::message_error! {
 pub fn load_json_config<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T, ConnectionError> {
     let content = std::fs::read_to_string(path)
         .map_err(|e| ConnectionError(format!("cannot read config file {}: {e}", path.display())))?;
-    serde_json::from_str(&content)
-        .map_err(|e| ConnectionError(format!("invalid JSON in {}: {e}", path.display())))
+    serde_json::from_str(&content).map_err(|e| ConnectionError(format!("invalid JSON in {}: {e}", path.display())))
 }
 
 /// Resolved connection settings that don't require any field to be
@@ -183,9 +182,7 @@ pub fn merge_connection(
 }
 
 fn password_from_cli_or_env(cli_password: Option<&str>, env_var: &str) -> Option<String> {
-    cli_password
-        .map(|p| p.to_string())
-        .or_else(|| std::env::var(env_var).ok())
+    cli_password.map(|p| p.to_string()).or_else(|| std::env::var(env_var).ok())
 }
 
 /// Resolves the FTP password: `--password` flag, then the environment

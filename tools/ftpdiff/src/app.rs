@@ -199,7 +199,13 @@ fn run_compare(cli: &Cli, json_config: &JsonConfig) -> Result<i32, CliError> {
     let mut entries = compare_entries(&local_entries, &remote_entries);
 
     if effective.hash {
-        hash_compared_entries(&effective, &mut connection, (&local_known_md5, &remote_known_md5), &mut entries, &mut progress)?;
+        hash_compared_entries(
+            &effective,
+            &mut connection,
+            (&local_known_md5, &remote_known_md5),
+            &mut entries,
+            &mut progress,
+        )?;
     }
 
     if let Some(conn) = connection {
@@ -246,7 +252,12 @@ fn exit_code_for(entries: &[DiffEntry]) -> i32 {
 
 /// Scans a local directory into `Scan` entries, hashing each file when
 /// `hash` is set.
-fn scan_local(dir: &Path, exclude: &ExcludeSet, hash: bool, progress: &mut Progress) -> Result<Vec<ReportEntry>, CliError> {
+fn scan_local(
+    dir: &Path,
+    exclude: &ExcludeSet,
+    hash: bool,
+    progress: &mut Progress,
+) -> Result<Vec<ReportEntry>, CliError> {
     let mut entries = Vec::new();
     for item in local::walk_local_dir(dir, exclude, progress.as_deref_mut())? {
         let mut entry = ReportEntry::scan(item.relative_path, Some(item.size), None);

@@ -24,8 +24,8 @@ impl ExcludeSet {
     pub fn new(patterns: &[String]) -> Result<Self, ExcludeError> {
         let mut set = ExcludeSet::default();
         for pattern in patterns {
-            let compiled = Pattern::new(pattern)
-                .map_err(|e| ExcludeError(format!("invalid exclude pattern '{pattern}': {e}")))?;
+            let compiled =
+                Pattern::new(pattern).map_err(|e| ExcludeError(format!("invalid exclude pattern '{pattern}': {e}")))?;
             set.patterns.push(compiled);
 
             let prefix = pattern.strip_suffix("/**").or_else(|| pattern.strip_suffix("/*"));

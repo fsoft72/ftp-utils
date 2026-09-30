@@ -99,7 +99,7 @@ pub fn apply_hash_comparison<C: FtpConnection>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     use crate::testing::MockFtpConnection;
 
     /// A server that returns `hash` from `try_hash` (if any) and serves
@@ -236,10 +236,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("f.txt"), b"hello").unwrap();
 
-        let mut entries = vec![
-            entry("f.txt"),
-            DiffEntry::new("only-local.txt", DiffStatus::LocalOnly, Some(5), None),
-        ];
+        let mut entries = vec![entry("f.txt"), DiffEntry::new("only-local.txt", DiffStatus::LocalOnly, Some(5), None)];
         let mut conn = server(None, b"hello");
 
         let mut messages = Vec::new();

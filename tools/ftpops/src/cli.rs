@@ -5,8 +5,8 @@ use std::path::PathBuf;
 use clap::{Parser, Subcommand};
 use ftp_utils_core::connection::ConnectionArgs;
 
-pub use crate::validate::{CopyTarget, DeleteTarget};
 use crate::filter::Filter;
+pub use crate::validate::{CopyTarget, DeleteTarget};
 
 /// Perform bulk copy/delete operations based on an ftpdiff CSV report.
 #[derive(Parser, Debug)]
@@ -78,14 +78,22 @@ mod tests {
     #[test]
     fn parses_copy_subcommand() {
         let cli = Cli::parse_from([
-            "ftpops", "copy",
-            "--to", "local",
-            "--filter", "remote-only",
-            "--csv", "report.csv",
-            "--host", "ftp.example.com",
-            "--user", "bob",
-            "--remote-dir", "/remote",
-            "--local-dir", "./local",
+            "ftpops",
+            "copy",
+            "--to",
+            "local",
+            "--filter",
+            "remote-only",
+            "--csv",
+            "report.csv",
+            "--host",
+            "ftp.example.com",
+            "--user",
+            "bob",
+            "--remote-dir",
+            "/remote",
+            "--local-dir",
+            "./local",
         ]);
 
         match cli.command {
@@ -104,10 +112,14 @@ mod tests {
     #[test]
     fn parses_copy_optional_flags() {
         let cli = Cli::parse_from([
-            "ftpops", "copy",
-            "--to", "remote",
-            "--filter", "local-only",
-            "--csv", "report.csv",
+            "ftpops",
+            "copy",
+            "--to",
+            "remote",
+            "--filter",
+            "local-only",
+            "--csv",
+            "report.csv",
             "--skip-existing",
             "--dry-run",
         ]);
@@ -123,12 +135,8 @@ mod tests {
 
     #[test]
     fn parses_delete_subcommand() {
-        let cli = Cli::parse_from([
-            "ftpops", "delete",
-            "--on", "remote",
-            "--filter", "remote-only",
-            "--csv", "report.csv",
-        ]);
+        let cli =
+            Cli::parse_from(["ftpops", "delete", "--on", "remote", "--filter", "remote-only", "--csv", "report.csv"]);
 
         match cli.command {
             Command::Delete { on, filter, csv, dry_run, .. } => {

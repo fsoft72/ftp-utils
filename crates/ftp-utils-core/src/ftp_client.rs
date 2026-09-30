@@ -7,8 +7,8 @@ use std::time::Duration;
 
 use suppaftp::list::ListParser;
 use suppaftp::native_tls::TlsConnector;
-use suppaftp::Status;
 use suppaftp::types::FileType;
+use suppaftp::Status;
 use suppaftp::{FtpStream, ImplFtpStream, NativeTlsConnector, NativeTlsFtpStream, TlsStream};
 
 use crate::connection::RemoteParams;
@@ -30,9 +30,8 @@ fn _connect_with_timeout<T: TlsStream>(
     port: u16,
     timeout: Duration,
 ) -> Result<ImplFtpStream<T>, FtpConnectionError> {
-    let addresses = (host, port)
-        .to_socket_addrs()
-        .map_err(|e| FtpConnectionError(format!("cannot resolve {host}:{port}: {e}")))?;
+    let addresses =
+        (host, port).to_socket_addrs().map_err(|e| FtpConnectionError(format!("cannot resolve {host}:{port}: {e}")))?;
 
     let mut last_error = FtpConnectionError(format!("no addresses found for {host}:{port}"));
     for address in addresses {
@@ -57,7 +56,8 @@ fn _connect_with_timeout<T: TlsStream>(
         };
 
         return Ok(stream.passive_stream_builder(move |data_address| {
-            let data = TcpStream::connect_timeout(&data_address, timeout).map_err(suppaftp::FtpError::ConnectionError)?;
+            let data =
+                TcpStream::connect_timeout(&data_address, timeout).map_err(suppaftp::FtpError::ConnectionError)?;
             data.set_read_timeout(Some(timeout)).map_err(suppaftp::FtpError::ConnectionError)?;
             data.set_write_timeout(Some(timeout)).map_err(suppaftp::FtpError::ConnectionError)?;
             Ok(data)
@@ -160,14 +160,10 @@ impl SuppaFtpConnection {
         let stream: NativeTlsFtpStream = _connect_with_timeout(host, port, timeout)?;
         let mut connector_builder = TlsConnector::builder();
         if insecure_tls {
-            connector_builder
-                .danger_accept_invalid_certs(true)
-                .danger_accept_invalid_hostnames(true);
+            connector_builder.danger_accept_invalid_certs(true).danger_accept_invalid_hostnames(true);
         }
         let connector = connector_builder.build().map_err(|e| FtpConnectionError(e.to_string()))?;
-        let mut stream = stream
-            .into_secure(NativeTlsConnector::from(connector), host)
-            .map_err(_ftp_error)?;
+        let mut stream = stream.into_secure(NativeTlsConnector::from(connector), host).map_err(_ftp_error)?;
         _login_binary(&mut stream, user, password)?;
         Ok(Self::new(Stream::Tls(stream)))
     }
@@ -197,7 +193,8 @@ impl SuppaFtpConnection {
     /// replies with something that doesn't contain an MD5.
     fn _send_hash_command(&mut self, command: &str, path: &str) -> Option<String> {
         let expected = [Status::Unknown, Status::CommandOk, Status::File, Status::RequestedFileActionOk];
-        let response = with_stream!(self, stream => stream.custom_command(format!("{command} {path}"), &expected)).ok()?;
+        let response =
+            with_stream!(self, stream => stream.custom_command(format!("{command} {path}"), &expected)).ok()?;
         parse_hash_response(&response.as_string().ok()?)
     }
 }
@@ -232,19 +229,15 @@ fn parse_listing(lines: &[String]) -> Result<Vec<RawRemoteEntry>, FtpConnectionE
         if name == "." || name == ".." {
             continue;
         }
-        entries.push(RawRemoteEntry {
-            name: name.to_string(),
-            is_dir: file.is_directory(),
-            size: file.size() as u64,
-        });
+        entries.push(RawRemoteEntry { name: name.to_string(), is_dir: file.is_directory(), size: file.size() as u64 });
     }
     Ok(entries)
 }
 
 impl FtpConnection for SuppaFtpConnection {
     fn list_dir(&mut self, path: &str) -> Result<Vec<RawRemoteEntry>, FtpConnectionError> {
-        let lines = with_stream!(self, stream => stream.list(Some(path)))
-        .map_err(|e| FtpConnectionError(e.to_string()))?;
+        let lines =
+            with_stream!(self, stream => stream.list(Some(path))).map_err(|e| FtpConnectionError(e.to_string()))?;
 
         parse_listing(&lines)
     }
@@ -274,8 +267,8 @@ impl FtpConnection for SuppaFtpConnection {
     }
 
     fn retr_to_buffer(&mut self, path: &str) -> Result<Vec<u8>, FtpConnectionError> {
-        let cursor = with_stream!(self, stream => stream.retr_as_buffer(path))
-        .map_err(|e| FtpConnectionError(e.to_string()))?;
+        let cursor =
+            with_stream!(self, stream => stream.retr_as_buffer(path)).map_err(|e| FtpConnectionError(e.to_string()))?;
         Ok(cursor.into_inner())
     }
 
@@ -312,18 +305,16 @@ impl FtpConnection for SuppaFtpConnection {
 
     fn store_from_reader(&mut self, path: &str, mut input: &mut dyn Read) -> Result<(), FtpConnectionError> {
         with_stream!(self, stream => stream.put_file(path, &mut input))
-        .map_err(|e| FtpConnectionError(e.to_string()))?;
+            .map_err(|e| FtpConnectionError(e.to_string()))?;
         Ok(())
     }
 
     fn delete(&mut self, path: &str) -> Result<(), FtpConnectionError> {
-        with_stream!(self, stream => stream.rm(path))
-        .map_err(|e| FtpConnectionError(e.to_string()))
+        with_stream!(self, stream => stream.rm(path)).map_err(|e| FtpConnectionError(e.to_string()))
     }
 
     fn create_dir(&mut self, path: &str) -> Result<(), FtpConnectionError> {
-        with_stream!(self, stream => stream.mkdir(path))
-        .map_err(|e| FtpConnectionError(e.to_string()))
+        with_stream!(self, stream => stream.mkdir(path)).map_err(|e| FtpConnectionError(e.to_string()))
     }
 }
 
@@ -340,10 +331,12 @@ mod tests {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
         // Accept and hold the socket open without ever writing to it.
-        let holder = std::thread::spawn(move || listener.accept().map(|(socket, _)| {
-            std::thread::sleep(Duration::from_millis(1500));
-            drop(socket);
-        }));
+        let holder = std::thread::spawn(move || {
+            listener.accept().map(|(socket, _)| {
+                std::thread::sleep(Duration::from_millis(1500));
+                drop(socket);
+            })
+        });
 
         let started = std::time::Instant::now();
         let result = SuppaFtpConnection::connect("127.0.0.1", port, "u", "p", false, false, Duration::from_millis(300));

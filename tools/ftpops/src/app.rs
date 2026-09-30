@@ -10,11 +10,11 @@ use ftp_utils_core::exit::{EXIT_FAILURES, EXIT_OK};
 use ftp_utils_core::ftp_client::SuppaFtpConnection;
 
 use crate::cli::{Cli, Command};
+use crate::confirm;
 use crate::filter::{self, Filter};
 use crate::ops::{self, OpResult};
 use crate::output;
 use crate::validate::{self, CopyTarget, DeleteTarget, ValidationError};
-use crate::confirm;
 
 /// Environment variable consulted for the FTP password.
 const PASSWORD_ENV_VAR: &str = "FTPOPS_PASSWORD";
@@ -79,9 +79,8 @@ fn load_job(args: &ConnectionArgs, csv_path: &Path) -> Result<(EffectiveConnecti
 fn connect(args: &ConnectionArgs, effective: &EffectiveConnection) -> Result<SuppaFtpConnection, CliError> {
     let password = connection::read_password(args.password.as_deref(), PASSWORD_ENV_VAR)?;
 
-    SuppaFtpConnection::connect_params(&effective.remote, &password).map_err(|e| {
-        CliError(format!("failed to connect to {}:{}: {e}", effective.remote.host, effective.remote.port))
-    })
+    SuppaFtpConnection::connect_params(&effective.remote, &password)
+        .map_err(|e| CliError(format!("failed to connect to {}:{}: {e}", effective.remote.host, effective.remote.port)))
 }
 
 /// Prints what `--dry-run` would do; touches nothing.
@@ -127,8 +126,12 @@ fn run_copy(
     let remote_dir = &effective.remote.remote_dir;
     let mut connection = connect(connection_args, &effective)?;
     let results = match to {
-        CopyTarget::Local => ops::copy_to_local(&mut connection, remote_dir, &effective.local_dir, &selected, skip_existing),
-        CopyTarget::Remote => ops::copy_to_remote(&mut connection, remote_dir, &effective.local_dir, &selected, skip_existing),
+        CopyTarget::Local => {
+            ops::copy_to_local(&mut connection, remote_dir, &effective.local_dir, &selected, skip_existing)
+        }
+        CopyTarget::Remote => {
+            ops::copy_to_remote(&mut connection, remote_dir, &effective.local_dir, &selected, skip_existing)
+        }
     };
     connection.close();
 

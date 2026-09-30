@@ -41,7 +41,8 @@ fn fixture() -> (tempfile::TempDir, std::path::PathBuf) {
     std::fs::write(dir.path().join("a.txt"), "a").unwrap();
     std::fs::write(dir.path().join("b.txt"), "b").unwrap();
     let csv = dir.path().join("report.csv");
-    std::fs::write(&csv, format!("{HEADER}a.txt,LocalOnly,1,,,\nb.txt,LocalOnly,1,,,\nkeep.txt,Match,1,1,,\n")).unwrap();
+    std::fs::write(&csv, format!("{HEADER}a.txt,LocalOnly,1,,,\nb.txt,LocalOnly,1,,,\nkeep.txt,Match,1,1,,\n"))
+        .unwrap();
     (dir, csv)
 }
 
@@ -168,11 +169,8 @@ fn copy_dry_run_previews_without_connecting() {
     let (dir, csv) = fixture();
     let csv = csv.to_str().unwrap();
 
-    let output = ftpops(
-        &["copy", "--to", "remote", "--filter", "local-only", "--csv", csv, "--dry-run"],
-        None,
-        dir.path(),
-    );
+    let output =
+        ftpops(&["copy", "--to", "remote", "--filter", "local-only", "--csv", csv, "--dry-run"], None, dir.path());
 
     assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
     assert!(stdout(&output).contains("Would copy 2 file(s)."), "{}", stdout(&output));

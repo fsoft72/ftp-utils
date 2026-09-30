@@ -48,10 +48,7 @@ pub fn walk_local_dir(
             continue;
         }
 
-        let size = dir_entry
-            .metadata()
-            .map_err(|e| std::io::Error::other(format!("{relative}: {e}")))?
-            .len();
+        let size = dir_entry.metadata().map_err(|e| std::io::Error::other(format!("{relative}: {e}")))?.len();
 
         if let Some(cb) = progress.as_deref_mut() {
             cb(&format!("local: {relative}"));

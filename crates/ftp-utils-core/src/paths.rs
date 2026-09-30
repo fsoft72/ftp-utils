@@ -20,7 +20,8 @@ pub fn validate_relative_path(relative_path: &str) -> Result<(), String> {
     if relative_path.split(['/', '\\']).any(|part| part == "..") {
         return Err(format!("path '{relative_path}' contains '..'"));
     }
-    let only_normal = Path::new(relative_path).components().all(|c| matches!(c, Component::Normal(_) | Component::CurDir));
+    let only_normal =
+        Path::new(relative_path).components().all(|c| matches!(c, Component::Normal(_) | Component::CurDir));
     if !only_normal {
         return Err(format!("path '{relative_path}' is not a plain relative path"));
     }

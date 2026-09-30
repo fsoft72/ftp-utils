@@ -54,10 +54,14 @@ mod tests {
     fn parses_minimal_args() {
         let cli = Cli::parse_from([
             "ftpdiff",
-            "--host", "ftp.example.com",
-            "--user", "bob",
-            "--remote-dir", "/remote",
-            "--local-dir", "./local",
+            "--host",
+            "ftp.example.com",
+            "--user",
+            "bob",
+            "--remote-dir",
+            "/remote",
+            "--local-dir",
+            "./local",
         ]);
 
         assert_eq!(cli.connection.host.as_deref(), Some("ftp.example.com"));
@@ -70,13 +74,7 @@ mod tests {
 
     #[test]
     fn parses_repeated_exclude_and_flags() {
-        let cli = Cli::parse_from([
-            "ftpdiff",
-            "--exclude", "*.tmp",
-            "--exclude", ".git/*",
-            "--ftps",
-            "--hash",
-        ]);
+        let cli = Cli::parse_from(["ftpdiff", "--exclude", "*.tmp", "--exclude", ".git/*", "--ftps", "--hash"]);
 
         assert_eq!(cli.exclude, vec!["*.tmp".to_string(), ".git/*".to_string()]);
         assert!(cli.connection.ftps);

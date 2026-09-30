@@ -18,16 +18,13 @@ crate::message_error! {
 const COLUMNS: [&str; 6] = ["path", "status", "local_size", "remote_size", "local_md5", "remote_md5"];
 
 fn _column_index(headers: &csv::StringRecord, name: &str) -> Result<usize, CsvSourceError> {
-    headers
-        .iter()
-        .position(|h| h == name)
-        .ok_or_else(|| CsvSourceError(format!("CSV missing '{name}' column")))
+    headers.iter().position(|h| h == name).ok_or_else(|| CsvSourceError(format!("CSV missing '{name}' column")))
 }
 
 /// Opens `path` as CSV and returns the reader with its header row.
 fn _open(path: &Path) -> Result<(csv::Reader<std::fs::File>, csv::StringRecord), CsvSourceError> {
-    let mut reader = csv::Reader::from_path(path)
-        .map_err(|e| CsvSourceError(format!("cannot read CSV {}: {e}", path.display())))?;
+    let mut reader =
+        csv::Reader::from_path(path).map_err(|e| CsvSourceError(format!("cannot read CSV {}: {e}", path.display())))?;
     let headers = reader.headers().map_err(|e| CsvSourceError(e.to_string()))?.clone();
     Ok((reader, headers))
 }
@@ -35,10 +32,8 @@ fn _open(path: &Path) -> Result<(csv::Reader<std::fs::File>, csv::StringRecord),
 /// Reads the `path` column of `record` and validates it as a safe
 /// relative path.
 fn _row_path(record: &csv::StringRecord, path_idx: usize) -> Result<String, CsvSourceError> {
-    let relative_path = record
-        .get(path_idx)
-        .ok_or_else(|| CsvSourceError("row missing 'path' value".to_string()))?
-        .to_string();
+    let relative_path =
+        record.get(path_idx).ok_or_else(|| CsvSourceError("row missing 'path' value".to_string()))?.to_string();
     crate::paths::validate_relative_path(&relative_path)
         .map_err(|e| CsvSourceError(format!("invalid CSV row: {e}")))?;
     Ok(relative_path)
@@ -138,9 +133,8 @@ pub fn read_status_rows(path: &Path) -> Result<Vec<StatusRow>, CsvSourceError> {
     for result in reader.records() {
         let record = result.map_err(|e| CsvSourceError(format!("invalid CSV row: {e}")))?;
         let relative_path = _row_path(&record, path_idx)?;
-        let status_text = record
-            .get(status_idx)
-            .ok_or_else(|| CsvSourceError("row missing 'status' value".to_string()))?;
+        let status_text =
+            record.get(status_idx).ok_or_else(|| CsvSourceError("row missing 'status' value".to_string()))?;
         let status = status_text
             .parse::<ReportStatus>()
             .map_err(|e| CsvSourceError(format!("row for '{relative_path}': {e}")))?;

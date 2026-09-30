@@ -76,9 +76,7 @@ pub fn merge_build(cli: &Cli, json: &JsonConfig) -> Result<BuildConfig, ConfigEr
     let csv = cli.csv.clone().ok_or_else(|| ConfigError("--build requires --csv".to_string()))?;
 
     if cli.local_csv.is_some() || cli.remote_csv.is_some() {
-        return Err(ConfigError(
-            "--build cannot be combined with --local-csv/--remote-csv".to_string(),
-        ));
+        return Err(ConfigError("--build cannot be combined with --local-csv/--remote-csv".to_string()));
     }
 
     let partial = connection::merge_connection_partial(&cli.connection, &json.connection);
@@ -87,8 +85,7 @@ pub fn merge_build(cli: &Cli, json: &JsonConfig) -> Result<BuildConfig, ConfigEr
 
     if has_local && has_remote {
         return Err(ConfigError(
-            "--build takes exactly one side: specify --local-dir, or --host/--user/--remote-dir, not both"
-                .to_string(),
+            "--build takes exactly one side: specify --local-dir, or --host/--user/--remote-dir, not both".to_string(),
         ));
     }
 
@@ -97,9 +94,7 @@ pub fn merge_build(cli: &Cli, json: &JsonConfig) -> Result<BuildConfig, ConfigEr
     } else if has_remote {
         BuildSide::Remote(partial.require_remote("or config file")?)
     } else {
-        return Err(ConfigError(
-            "--build requires --local-dir, or --host/--user/--remote-dir".to_string(),
-        ));
+        return Err(ConfigError("--build requires --local-dir, or --host/--user/--remote-dir".to_string()));
     };
 
     let exclude = merge_excludes(cli, json)?;
@@ -207,11 +202,7 @@ mod tests {
     fn loads_json_config_from_file() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("config.json");
-        std::fs::write(
-            &path,
-            r#"{"host": "ftp.example.com", "user": "bob", "exclude": ["*.tmp"]}"#,
-        )
-        .unwrap();
+        std::fs::write(&path, r#"{"host": "ftp.example.com", "user": "bob", "exclude": ["*.tmp"]}"#).unwrap();
 
         let config = load_json_config(&path).unwrap();
 
