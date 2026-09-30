@@ -55,7 +55,7 @@
 
 ## Low / Nice to have
 
-- [ ] **Share the mock `FtpConnection` across tests** - the same `MockConnection` (all six trait methods) is re-implemented in `remote.rs`, `hash.rs`, `lib.rs` and `ops.rs` tests. Provide one configurable mock behind a `test-utils` feature or `#[cfg(test)]` module.
+- [x] **Share the mock `FtpConnection` across tests** - the same `MockConnection` (all six trait methods) is re-implemented in `remote.rs`, `hash.rs`, `lib.rs` and `ops.rs` tests. Provide one configurable mock behind a `test-utils` feature or `#[cfg(test)]` module.
   - File(s): `crates/ftp-utils-core/src/remote.rs`, `crates/ftp-utils-core/src/hash.rs`, `crates/ftp-utils-core/src/lib.rs`, `tools/ftpops/src/ops.rs`
 - [x] **Untested orchestration and FTP client** - `ftp_client.rs`, `ftpdiff/main.rs` and `ftpops/main.rs` have no tests, so exit-code behavior and the CSV/live wiring are only covered manually. Once `run` is split, add integration tests (e.g. against an in-process FTP server such as `libunftp`) and CLI tests with `assert_cmd`. *Done without new dependencies: an in-process fake FTP server (`crates/ftp-utils-core/tests/ftp_client.rs`) instead of `libunftp`, and `std::process::Command` on `CARGO_BIN_EXE_*` instead of `assert_cmd`. FTPS is not covered.*
   - File(s): `crates/ftp-utils-core/src/ftp_client.rs`, `tools/ftpdiff/src/main.rs`, `tools/ftpops/src/main.rs`

@@ -11,4 +11,5 @@ clap.workspace = true
 colored.workspace = true
 
 [dev-dependencies]
+ftp-utils-core = { path = "../../crates/ftp-utils-core", features = ["test-utils"] }
 tempfile.workspace = true

@@ -172,49 +172,11 @@ mod tests {
     use super::*;
     use std::collections::HashMap;
 
-    struct MockFtpConnection {
-        listings: HashMap<String, Vec<RawRemoteEntry>>,
-        created_dirs: Vec<String>,
-    }
+    use crate::testing::MockFtpConnection;
 
-    impl FtpConnection for MockFtpConnection {
-        fn list_dir(&mut self, path: &str) -> Result<Vec<RawRemoteEntry>, FtpConnectionError> {
-            self.listings
-                .get(path)
-                .cloned()
-                .ok_or_else(|| FtpConnectionError(format!("no listing for {path}")))
-        }
-
-        fn try_hash(&mut self, _path: &str) -> Option<String> {
-            None
-        }
-
-        fn retr_to_buffer(&mut self, _path: &str) -> Result<Vec<u8>, FtpConnectionError> {
-            Ok(Vec::new())
-        }
-
-        fn store_from_buffer(&mut self, _path: &str, _data: &[u8]) -> Result<(), FtpConnectionError> {
-            Ok(())
-        }
-
-        fn delete(&mut self, _path: &str) -> Result<(), FtpConnectionError> {
-            Ok(())
-        }
-
-        fn create_dir(&mut self, path: &str) -> Result<(), FtpConnectionError> {
-            self.created_dirs.push(path.to_string());
-
-            let (parent, name) = path.rsplit_once('/').unwrap_or(("", path));
-            let parent = if parent.is_empty() { "/" } else { parent };
-
-            self.listings
-                .entry(parent.to_string())
-                .or_default()
-                .push(RawRemoteEntry { name: name.to_string(), is_dir: true, size: 0 });
-            self.listings.entry(path.to_string()).or_default();
-
-            Ok(())
-        }
+    /// A mock that fails on any directory it has no listing for.
+    fn mock(listings: HashMap<String, Vec<RawRemoteEntry>>) -> MockFtpConnection {
+        MockFtpConnection::strict(listings)
     }
 
     #[test]
@@ -231,7 +193,7 @@ mod tests {
         let mut listings = HashMap::new();
         listings.insert("/".to_string(), vec![RawRemoteEntry { name: "sub".into(), is_dir: true, size: 0 }]);
         listings.insert("/sub".to_string(), vec![RawRemoteEntry { name: "b.txt".into(), is_dir: false, size: 1 }]);
-        let mut conn = MockFtpConnection { listings, created_dirs: Vec::new() };
+        let mut conn = mock(listings);
 
         let entries = walk_remote(&mut conn, "/", &ExcludeSet::default(), None).unwrap();
 
@@ -252,7 +214,7 @@ mod tests {
             "/remote/sub".to_string(),
             vec![RawRemoteEntry { name: "b.txt".into(), is_dir: false, size: 20 }],
         );
-        let mut conn = MockFtpConnection { listings, created_dirs: Vec::new() };
+        let mut conn = mock(listings);
 
         let mut entries = walk_remote(&mut conn, "/remote", &ExcludeSet::default(), None).unwrap();
         entries.sort_by(|a, b| a.relative_path.cmp(&b.relative_path));
@@ -277,7 +239,7 @@ mod tests {
             ],
         );
         // No "/remote/.git" listing: MockFtpConnection errors if it is listed.
-        let mut conn = MockFtpConnection { listings, created_dirs: Vec::new() };
+        let mut conn = mock(listings);
         let excludes = ExcludeSet::new(&[".git/*".to_string()]).unwrap();
 
         let entries = walk_remote(&mut conn, "/remote", &excludes, None).unwrap();
@@ -296,7 +258,7 @@ mod tests {
                 RawRemoteEntry { name: "skip.tmp".into(), is_dir: false, size: 1 },
             ],
         );
-        let mut conn = MockFtpConnection { listings, created_dirs: Vec::new() };
+        let mut conn = mock(listings);
 
         let entries = walk_remote(&mut conn, "/remote", &ExcludeSet::new(&["*.tmp".to_string()]).unwrap(), None).unwrap();
 
@@ -314,7 +276,7 @@ mod tests {
                 RawRemoteEntry { name: "skip.tmp".into(), is_dir: false, size: 1 },
             ],
         );
-        let mut conn = MockFtpConnection { listings, created_dirs: Vec::new() };
+        let mut conn = mock(listings);
 
         let mut messages = Vec::new();
         let mut progress = |msg: &str| messages.push(msg.to_string());
@@ -328,7 +290,7 @@ mod tests {
     fn ensure_remote_dir_creates_missing_components() {
         let mut listings = HashMap::new();
         listings.insert("/".to_string(), vec![]);
-        let mut conn = MockFtpConnection { listings, created_dirs: Vec::new() };
+        let mut conn = mock(listings);
 
         conn.ensure_remote_dir("/a/b/file.txt").unwrap();
 
@@ -340,7 +302,7 @@ mod tests {
         let mut listings = HashMap::new();
         listings.insert("/".to_string(), vec![RawRemoteEntry { name: "a".into(), is_dir: true, size: 0 }]);
         listings.insert("/a".to_string(), vec![]);
-        let mut conn = MockFtpConnection { listings, created_dirs: Vec::new() };
+        let mut conn = mock(listings);
 
         conn.ensure_remote_dir("/a/b/file.txt").unwrap();
 
@@ -351,7 +313,7 @@ mod tests {
     fn ensure_remote_dir_cached_skips_directories_already_known() {
         let mut listings = HashMap::new();
         listings.insert("/".to_string(), vec![]);
-        let mut conn = MockFtpConnection { listings, created_dirs: Vec::new() };
+        let mut conn = mock(listings);
         let mut known = HashSet::new();
 
         conn.ensure_remote_dir_cached("/a/b/one.txt", &mut known).unwrap();
@@ -368,7 +330,7 @@ mod tests {
         // passes if the cache avoids the round trip.
         let mut listings = HashMap::new();
         listings.insert("/a".to_string(), vec![]);
-        let mut conn = MockFtpConnection { listings, created_dirs: Vec::new() };
+        let mut conn = mock(listings);
         let mut known: HashSet<String> = ["/a".to_string()].into();
 
         conn.ensure_remote_dir_cached("/a/b/file.txt", &mut known).unwrap();
@@ -380,7 +342,7 @@ mod tests {
     fn ensure_remote_dir_is_a_noop_for_root_level_files() {
         let mut listings = HashMap::new();
         listings.insert("/".to_string(), vec![]);
-        let mut conn = MockFtpConnection { listings, created_dirs: Vec::new() };
+        let mut conn = mock(listings);
 
         conn.ensure_remote_dir("/file.txt").unwrap();
 

@@ -309,40 +309,14 @@ fn run_build(cli: &Cli, json_config: &JsonConfig) -> Result<i32, CliError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ftp_utils_core::testing::MockFtpConnection;
     use ftp_utils_core::RawRemoteEntry;
 
     /// MD5 of the bytes `hello`.
     const HELLO_MD5: &str = "5d41402abc4b2a76b9719d911017c592";
 
-    /// Serves fixed listings and file contents; hashing falls back to a
-    /// download because `try_hash` is unsupported.
-    struct FakeServer {
-        listings: HashMap<String, Vec<RawRemoteEntry>>,
-        files: HashMap<String, Vec<u8>>,
-    }
-
-    impl FtpConnection for FakeServer {
-        fn list_dir(&mut self, path: &str) -> Result<Vec<RawRemoteEntry>, FtpConnectionError> {
-            self.listings.get(path).cloned().ok_or_else(|| FtpConnectionError(format!("no listing for {path}")))
-        }
-        fn try_hash(&mut self, _path: &str) -> Option<String> {
-            None
-        }
-        fn retr_to_buffer(&mut self, path: &str) -> Result<Vec<u8>, FtpConnectionError> {
-            self.files.get(path).cloned().ok_or_else(|| FtpConnectionError(format!("no file {path}")))
-        }
-        fn store_from_buffer(&mut self, _path: &str, _data: &[u8]) -> Result<(), FtpConnectionError> {
-            Ok(())
-        }
-        fn delete(&mut self, _path: &str) -> Result<(), FtpConnectionError> {
-            Ok(())
-        }
-        fn create_dir(&mut self, _path: &str) -> Result<(), FtpConnectionError> {
-            Ok(())
-        }
-    }
-
-    fn server() -> FakeServer {
+    /// A server with `/remote/a.txt` ("hello") and `/remote/skip.tmp`.
+    fn server() -> MockFtpConnection {
         let mut listings = HashMap::new();
         listings.insert(
             "/remote".to_string(),
@@ -353,7 +327,7 @@ mod tests {
         );
         let mut files = HashMap::new();
         files.insert("/remote/a.txt".to_string(), b"hello".to_vec());
-        FakeServer { listings, files }
+        MockFtpConnection { files, ..MockFtpConnection::strict(listings) }
     }
 
     fn excludes(patterns: &[&str]) -> ExcludeSet {

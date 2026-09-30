@@ -121,3 +121,4 @@
 - Split ftpdiff's `run`/`run_build` into small testable functions in `app.rs` (`Result<_, CliError>` with one exit-code mapping in `main`), added shared `connect_remote`, `exit` constants in core, and end-to-end CLI tests (`tools/ftpdiff/tests/cli.rs`). Dropped unused `csv` deps from the tools.
 - Refactored ftpops into `app.rs` (shared `load_job`/`preview`/`report`, `Result<_, CliError>`, `EXIT_*` constants) and added end-to-end CLI tests (`tools/ftpops/tests/cli.rs`); a declined delete prompt now reports `Error: aborted, ...`.
 - Added integration tests for `SuppaFtpConnection` against an in-process fake FTP server (listing, streaming transfers, delete/mkdir, hash probing, recursion).
+- Replaced four hand-written test mocks with one `ftp_utils_core::testing::MockFtpConnection` (behind the `test-utils` feature for the tools' tests).

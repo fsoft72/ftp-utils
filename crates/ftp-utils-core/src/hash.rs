@@ -99,36 +99,16 @@ pub fn apply_hash_comparison<C: FtpConnection>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::remote::{FtpConnectionError, RawRemoteEntry};
+    
+    use crate::testing::MockFtpConnection;
 
-    struct MockConnection {
-        hash: Option<String>,
-        remote_bytes: Vec<u8>,
-    }
-
-    impl FtpConnection for MockConnection {
-        fn list_dir(&mut self, _path: &str) -> Result<Vec<RawRemoteEntry>, FtpConnectionError> {
-            Ok(Vec::new())
-        }
-
-        fn try_hash(&mut self, _path: &str) -> Option<String> {
-            self.hash.clone()
-        }
-
-        fn retr_to_buffer(&mut self, _path: &str) -> Result<Vec<u8>, FtpConnectionError> {
-            Ok(self.remote_bytes.clone())
-        }
-
-        fn store_from_buffer(&mut self, _path: &str, _data: &[u8]) -> Result<(), FtpConnectionError> {
-            Ok(())
-        }
-
-        fn delete(&mut self, _path: &str) -> Result<(), FtpConnectionError> {
-            Ok(())
-        }
-
-        fn create_dir(&mut self, _path: &str) -> Result<(), FtpConnectionError> {
-            Ok(())
+    /// A server that returns `hash` from `try_hash` (if any) and serves
+    /// `content` for every downloaded path.
+    fn server(hash: Option<&str>, content: &[u8]) -> MockFtpConnection {
+        MockFtpConnection {
+            hash: hash.map(str::to_string),
+            default_content: Some(content.to_vec()),
+            ..MockFtpConnection::default()
         }
     }
 
@@ -153,14 +133,14 @@ mod tests {
 
     #[test]
     fn remote_md5_hashes_streamed_download_when_server_hash_missing() {
-        let mut conn = MockConnection { hash: None, remote_bytes: b"hello".to_vec() };
+        let mut conn = server(None, b"hello");
 
         assert_eq!(remote_md5(&mut conn, "/r/f.txt").unwrap(), format!("{:x}", md5::compute(b"hello")));
     }
 
     #[test]
     fn remote_md5_prefers_server_hash() {
-        let mut conn = MockConnection { hash: Some("server-hash".to_string()), remote_bytes: b"x".to_vec() };
+        let mut conn = server(Some("server-hash"), b"x");
 
         assert_eq!(remote_md5(&mut conn, "/r/f.txt").unwrap(), "server-hash");
     }
@@ -170,7 +150,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let mut entries = vec![entry("missing.txt")];
 
-        let err = apply_hash_comparison::<MockConnection>(
+        let err = apply_hash_comparison::<MockFtpConnection>(
             None,
             None,
             Some(dir.path()),
@@ -191,7 +171,7 @@ mod tests {
         let expected_hash = format!("{:x}", md5::compute(b"hello"));
 
         let mut entries = vec![entry("f.txt")];
-        let mut conn = MockConnection { hash: Some(expected_hash.clone()), remote_bytes: Vec::new() };
+        let mut conn = server(Some(&expected_hash), b"");
 
         apply_hash_comparison(
             Some(&mut conn),
@@ -214,7 +194,7 @@ mod tests {
         std::fs::write(dir.path().join("f.txt"), b"hello").unwrap();
 
         let mut entries = vec![entry("f.txt")];
-        let mut conn = MockConnection { hash: None, remote_bytes: b"different".to_vec() };
+        let mut conn = server(None, b"different");
 
         apply_hash_comparison(
             Some(&mut conn),
@@ -234,7 +214,7 @@ mod tests {
     fn leaves_non_match_entries_untouched() {
         let dir = tempfile::tempdir().unwrap();
         let mut entries = vec![DiffEntry::new("only-local.txt", DiffStatus::LocalOnly, Some(5), None)];
-        let mut conn = MockConnection { hash: None, remote_bytes: Vec::new() };
+        let mut conn = server(None, b"");
 
         apply_hash_comparison(
             Some(&mut conn),
@@ -260,7 +240,7 @@ mod tests {
             entry("f.txt"),
             DiffEntry::new("only-local.txt", DiffStatus::LocalOnly, Some(5), None),
         ];
-        let mut conn = MockConnection { hash: None, remote_bytes: b"hello".to_vec() };
+        let mut conn = server(None, b"hello");
 
         let mut messages = Vec::new();
         let mut progress = |msg: &str| messages.push(msg.to_string());
@@ -289,7 +269,7 @@ mod tests {
         let mut remote_known = HashMap::new();
         remote_known.insert("f.txt".to_string(), "same-hash".to_string());
 
-        apply_hash_comparison::<MockConnection>(None, None, None, &local_known, &remote_known, &mut entries, None)
+        apply_hash_comparison::<MockFtpConnection>(None, None, None, &local_known, &remote_known, &mut entries, None)
             .unwrap();
 
         assert_eq!(entries[0].status, DiffStatus::Match);
@@ -301,7 +281,7 @@ mod tests {
     fn leaves_entry_at_match_when_hash_unresolvable_on_either_side() {
         let mut entries = vec![entry("f.txt")];
 
-        apply_hash_comparison::<MockConnection>(
+        apply_hash_comparison::<MockFtpConnection>(
             None,
             None,
             None,

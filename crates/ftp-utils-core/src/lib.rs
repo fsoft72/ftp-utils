@@ -20,5 +20,8 @@ pub mod local;
 pub mod paths;
 pub mod remote;
 
+#[cfg(any(test, feature = "test-utils"))]
+pub mod testing;
+
 pub use diff::{DiffEntry, DiffStatus};
 pub use remote::{FtpConnection, FtpConnectionError, RawRemoteEntry};

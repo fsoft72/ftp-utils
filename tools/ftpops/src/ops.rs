@@ -188,59 +188,9 @@ pub fn delete_local(local_dir: &Path, rows: &[&StatusRow]) -> Vec<OpResult> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ftp_utils_core::remote::{FtpConnectionError, RawRemoteEntry};
-    use std::collections::HashMap;
-
-    #[derive(Default)]
-    struct MockConnection {
-        listings: HashMap<String, Vec<RawRemoteEntry>>,
-        remote_files: HashMap<String, Vec<u8>>,
-        stored: Vec<(String, Vec<u8>)>,
-        deleted: Vec<String>,
-        created_dirs: Vec<String>,
-    }
-
-    impl FtpConnection for MockConnection {
-        fn list_dir(&mut self, path: &str) -> Result<Vec<RawRemoteEntry>, FtpConnectionError> {
-            Ok(self.listings.get(path).cloned().unwrap_or_default())
-        }
-
-        fn try_hash(&mut self, _path: &str) -> Option<String> {
-            None
-        }
-
-        fn retr_to_buffer(&mut self, path: &str) -> Result<Vec<u8>, FtpConnectionError> {
-            self.remote_files
-                .get(path)
-                .cloned()
-                .ok_or_else(|| FtpConnectionError(format!("no such remote file: {path}")))
-        }
-
-        fn store_from_buffer(&mut self, path: &str, data: &[u8]) -> Result<(), FtpConnectionError> {
-            self.stored.push((path.to_string(), data.to_vec()));
-            Ok(())
-        }
-
-        fn delete(&mut self, path: &str) -> Result<(), FtpConnectionError> {
-            self.deleted.push(path.to_string());
-            Ok(())
-        }
-
-        fn create_dir(&mut self, path: &str) -> Result<(), FtpConnectionError> {
-            self.created_dirs.push(path.to_string());
-
-            let (parent, name) = path.rsplit_once('/').unwrap_or(("", path));
-            let parent = if parent.is_empty() { "/" } else { parent };
-
-            self.listings
-                .entry(parent.to_string())
-                .or_default()
-                .push(RawRemoteEntry { name: name.to_string(), is_dir: true, size: 0 });
-            self.listings.entry(path.to_string()).or_default();
-
-            Ok(())
-        }
-    }
+    
+    use ftp_utils_core::remote::RawRemoteEntry;
+    use ftp_utils_core::testing::MockFtpConnection;
 
     fn row(relative_path: &str) -> StatusRow {
         StatusRow { relative_path: relative_path.to_string(), status: ftp_utils_core::DiffStatus::RemoteOnly }
@@ -249,8 +199,8 @@ mod tests {
     #[test]
     fn copy_to_local_downloads_and_creates_parent_dirs() {
         let dir = tempfile::tempdir().unwrap();
-        let mut conn = MockConnection::default();
-        conn.remote_files.insert("/remote/sub/file.txt".to_string(), b"hello".to_vec());
+        let mut conn = MockFtpConnection::default();
+        conn.files.insert("/remote/sub/file.txt".to_string(), b"hello".to_vec());
 
         let rows = vec![row("sub/file.txt")];
         let refs: Vec<&StatusRow> = rows.iter().collect();
@@ -266,8 +216,8 @@ mod tests {
     fn copy_to_local_skips_when_destination_exists_and_skip_existing() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("file.txt"), b"already here").unwrap();
-        let mut conn = MockConnection::default();
-        conn.remote_files.insert("/remote/file.txt".to_string(), b"new content".to_vec());
+        let mut conn = MockFtpConnection::default();
+        conn.files.insert("/remote/file.txt".to_string(), b"new content".to_vec());
 
         let rows = vec![row("file.txt")];
         let refs: Vec<&StatusRow> = rows.iter().collect();
@@ -283,7 +233,7 @@ mod tests {
     fn copy_to_local_failure_keeps_existing_file_and_leaves_no_temp_file() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("file.txt"), b"previous content").unwrap();
-        let mut conn = MockConnection::default(); // remote file is missing: download fails
+        let mut conn = MockFtpConnection::default(); // remote file is missing: download fails
 
         let rows = vec![row("file.txt")];
         let refs: Vec<&StatusRow> = rows.iter().collect();
@@ -300,8 +250,8 @@ mod tests {
     fn copy_to_local_overwrites_existing_file_on_success() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("file.txt"), b"old").unwrap();
-        let mut conn = MockConnection::default();
-        conn.remote_files.insert("/remote/file.txt".to_string(), b"new".to_vec());
+        let mut conn = MockFtpConnection::default();
+        conn.files.insert("/remote/file.txt".to_string(), b"new".to_vec());
 
         let rows = vec![row("file.txt")];
         let refs: Vec<&StatusRow> = rows.iter().collect();
@@ -315,7 +265,7 @@ mod tests {
     #[test]
     fn copy_to_local_reports_failure_for_missing_remote_file() {
         let dir = tempfile::tempdir().unwrap();
-        let mut conn = MockConnection::default();
+        let mut conn = MockFtpConnection::default();
 
         let rows = vec![row("missing.txt")];
         let refs: Vec<&StatusRow> = rows.iter().collect();
@@ -331,7 +281,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir(dir.path().join("sub")).unwrap();
         std::fs::write(dir.path().join("sub/file.txt"), b"hello").unwrap();
-        let mut conn = MockConnection::default();
+        let mut conn = MockFtpConnection::default();
         conn.listings.insert("/".to_string(), vec![]);
 
         let rows = vec![row("sub/file.txt")];
@@ -348,7 +298,7 @@ mod tests {
     fn copy_to_remote_skips_when_destination_exists_and_skip_existing() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("file.txt"), b"local content").unwrap();
-        let mut conn = MockConnection::default();
+        let mut conn = MockFtpConnection::default();
         conn.listings.insert("/remote".to_string(), vec![RawRemoteEntry { name: "file.txt".into(), is_dir: false, size: 5 }]);
 
         let rows = vec![row("file.txt")];
@@ -362,31 +312,9 @@ mod tests {
 
     #[test]
     fn copy_to_remote_does_not_overwrite_when_existence_check_fails() {
-        struct FailingListConnection(MockConnection);
-        impl FtpConnection for FailingListConnection {
-            fn list_dir(&mut self, path: &str) -> Result<Vec<RawRemoteEntry>, FtpConnectionError> {
-                Err(FtpConnectionError(format!("listing failed for {path}")))
-            }
-            fn try_hash(&mut self, p: &str) -> Option<String> {
-                self.0.try_hash(p)
-            }
-            fn retr_to_buffer(&mut self, p: &str) -> Result<Vec<u8>, FtpConnectionError> {
-                self.0.retr_to_buffer(p)
-            }
-            fn store_from_buffer(&mut self, p: &str, d: &[u8]) -> Result<(), FtpConnectionError> {
-                self.0.store_from_buffer(p, d)
-            }
-            fn delete(&mut self, p: &str) -> Result<(), FtpConnectionError> {
-                self.0.delete(p)
-            }
-            fn create_dir(&mut self, p: &str) -> Result<(), FtpConnectionError> {
-                self.0.create_dir(p)
-            }
-        }
-
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("file.txt"), b"local content").unwrap();
-        let mut conn = FailingListConnection(MockConnection::default());
+        let mut conn = MockFtpConnection { fail_listings: true, ..MockFtpConnection::default() };
 
         let rows = vec![row("file.txt")];
         let refs: Vec<&StatusRow> = rows.iter().collect();
@@ -394,45 +322,18 @@ mod tests {
         let results = copy_to_remote(&mut conn, "/remote", dir.path(), &refs, true);
 
         assert!(matches!(results[0].outcome, OpOutcome::Failed(_)));
-        assert!(conn.0.stored.is_empty());
+        assert!(conn.stored.is_empty());
     }
 
     #[test]
     fn copy_to_remote_lists_each_directory_once_with_skip_existing() {
-        struct CountingConnection {
-            inner: MockConnection,
-            list_calls: Vec<String>,
-        }
-        impl FtpConnection for CountingConnection {
-            fn list_dir(&mut self, path: &str) -> Result<Vec<RawRemoteEntry>, FtpConnectionError> {
-                self.list_calls.push(path.to_string());
-                self.inner.list_dir(path)
-            }
-            fn try_hash(&mut self, p: &str) -> Option<String> {
-                self.inner.try_hash(p)
-            }
-            fn retr_to_buffer(&mut self, p: &str) -> Result<Vec<u8>, FtpConnectionError> {
-                self.inner.retr_to_buffer(p)
-            }
-            fn store_from_buffer(&mut self, p: &str, d: &[u8]) -> Result<(), FtpConnectionError> {
-                self.inner.store_from_buffer(p, d)
-            }
-            fn delete(&mut self, p: &str) -> Result<(), FtpConnectionError> {
-                self.inner.delete(p)
-            }
-            fn create_dir(&mut self, p: &str) -> Result<(), FtpConnectionError> {
-                self.inner.create_dir(p)
-            }
-        }
-
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir(dir.path().join("sub")).unwrap();
         for name in ["sub/a.txt", "sub/b.txt", "sub/c.txt"] {
             std::fs::write(dir.path().join(name), b"x").unwrap();
         }
-        let mut inner = MockConnection::default();
-        inner.listings.insert("/".to_string(), vec![]);
-        let mut conn = CountingConnection { inner, list_calls: Vec::new() };
+        let mut conn = MockFtpConnection::default();
+        conn.listings.insert("/".to_string(), vec![]);
 
         let rows = vec![row("sub/a.txt"), row("sub/b.txt"), row("sub/c.txt")];
         let refs: Vec<&StatusRow> = rows.iter().collect();
@@ -449,7 +350,7 @@ mod tests {
 
     #[test]
     fn delete_remote_calls_delete_with_full_path() {
-        let mut conn = MockConnection::default();
+        let mut conn = MockFtpConnection::default();
 
         let rows = vec![row("a.txt"), row("sub/b.txt")];
         let refs: Vec<&StatusRow> = rows.iter().collect();

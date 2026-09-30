@@ -16,5 +16,9 @@ serde_json.workspace = true
 rpassword.workspace = true
 csv.workspace = true
 
+[features]
+# Exposes `testing::MockFtpConnection` to other crates' tests.
+test-utils = []
+
 [dev-dependencies]
 tempfile.workspace = true
