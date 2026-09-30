@@ -1,6 +1,7 @@
 //! Human-readable colored text output for diff results.
 
 use colored::Colorize;
+use ftp_utils_core::csv_source::ReportEntry;
 use ftp_utils_core::{DiffEntry, DiffStatus};
 
 /// Formats one diff entry as a single colored line.
@@ -17,8 +18,12 @@ pub fn format_entry(entry: &DiffEntry) -> String {
         ),
         DiffStatus::HashMismatch => format!("{} {} (hash differs)", "~".yellow(), entry.relative_path),
         DiffStatus::Match => format!("{} {}", "=".dimmed(), entry.relative_path),
-        DiffStatus::Scan => format!("{} {}", "*".cyan(), entry.relative_path),
     }
+}
+
+/// Formats one `--build` entry (no comparison happened) as a single line.
+pub fn format_scan_entry(entry: &ReportEntry) -> String {
+    format!("{} {}", "*".cyan(), entry.relative_path)
 }
 
 /// Counts of entries by status.
@@ -40,9 +45,6 @@ pub fn summarize(entries: &[DiffEntry]) -> Summary {
             DiffStatus::SizeMismatch => summary.size_mismatch += 1,
             DiffStatus::HashMismatch => summary.hash_mismatch += 1,
             DiffStatus::Match => summary.matched += 1,
-            // Never produced by compare_entries; --build mode has its own
-            // "Scanned N entries." line instead of this summary.
-            DiffStatus::Scan => {}
         }
     }
     summary
@@ -73,7 +75,7 @@ mod tests {
         assert!(format_entry(&entry("c.txt", DiffStatus::SizeMismatch)).contains("c.txt"));
         assert!(format_entry(&entry("d.txt", DiffStatus::HashMismatch)).contains("d.txt"));
         assert!(format_entry(&entry("e.txt", DiffStatus::Match)).contains("e.txt"));
-        assert!(format_entry(&entry("f.txt", DiffStatus::Scan)).contains("f.txt"));
+        assert!(format_scan_entry(&ReportEntry::scan("f.txt", Some(1), None)).contains("f.txt"));
     }
 
     #[test]

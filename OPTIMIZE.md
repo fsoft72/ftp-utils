@@ -63,7 +63,7 @@
   - File(s): `tools/ftpops/src/main.rs`, `tools/ftpdiff/src/main.rs`
 - [x] **Stale module doc and default port literal** - `diff.rs` still says comparison "will be implemented according to the implementation plan", and the default port `21` is a bare literal in `merge_connection_partial`. Update the doc and add `const DEFAULT_FTP_PORT: u16 = 21;`.
   - File(s): `crates/ftp-utils-core/src/diff.rs`, `crates/ftp-utils-core/src/connection.rs`
-- [ ] **`DiffStatus::Scan` leaks into compare-only code** - `summarize` needs a dead `Scan => {}` arm and `format_entry` handles a status that `compare_entries` never produces. Model build output as its own type (or split the enum) so each mode only sees valid states.
+- [x] **`DiffStatus::Scan` leaks into compare-only code** - `summarize` needs a dead `Scan => {}` arm and `format_entry` handles a status that `compare_entries` never produces. Model build output as its own type (or split the enum) so each mode only sees valid states.
   - File(s): `crates/ftp-utils-core/src/diff.rs`, `tools/ftpdiff/src/output.rs`
 - [ ] **No CI or lint/format configuration** - no `.github/` workflows, `rustfmt.toml` or clippy settings, and `io::Error::new(ErrorKind::Other, ..)` (replaceable with `io::Error::other`) is the kind of thing clippy would flag. Add a CI job running `cargo fmt --check`, `cargo clippy -- -D warnings` and `cargo test`.
   - File(s): repository root

@@ -8,7 +8,7 @@ use std::path::Path;
 
 use ftp_utils_core::compare::compare_entries;
 use ftp_utils_core::connection::{ConnectionError, RemoteParams};
-use ftp_utils_core::csv_source::{self, CsvSourceError};
+use ftp_utils_core::csv_source::{self, CsvSourceError, ReportEntry};
 use ftp_utils_core::exclude::ExcludeSet;
 use ftp_utils_core::exit::{EXIT_FAILURES, EXIT_OK};
 use ftp_utils_core::ftp_client::SuppaFtpConnection;
@@ -168,7 +168,7 @@ fn print_report(entries: &[DiffEntry]) {
 }
 
 /// Writes the CSV report to `path`.
-fn write_csv(path: &Path, entries: &[DiffEntry], verbose: bool) -> Result<(), CliError> {
+fn write_csv(path: &Path, entries: &[ReportEntry], verbose: bool) -> Result<(), CliError> {
     if verbose {
         eprintln!("Writing CSV report to {}...", path.display());
     }
@@ -213,7 +213,8 @@ fn run_compare(cli: &Cli, json_config: &JsonConfig) -> Result<i32, CliError> {
     print_report(&entries);
 
     if let Some(csv_path) = &effective.csv {
-        write_csv(csv_path, &entries, effective.verbose)?;
+        let rows: Vec<ReportEntry> = entries.iter().map(ReportEntry::from).collect();
+        write_csv(csv_path, &rows, effective.verbose)?;
     }
 
     Ok(exit_code_for(&entries))
@@ -245,10 +246,10 @@ fn exit_code_for(entries: &[DiffEntry]) -> i32 {
 
 /// Scans a local directory into `Scan` entries, hashing each file when
 /// `hash` is set.
-fn scan_local(dir: &Path, exclude: &ExcludeSet, hash: bool, progress: &mut Progress) -> Result<Vec<DiffEntry>, CliError> {
+fn scan_local(dir: &Path, exclude: &ExcludeSet, hash: bool, progress: &mut Progress) -> Result<Vec<ReportEntry>, CliError> {
     let mut entries = Vec::new();
     for item in local::walk_local_dir(dir, exclude, progress.as_deref_mut())? {
-        let mut entry = DiffEntry::new(item.relative_path, DiffStatus::Scan, Some(item.size), None);
+        let mut entry = ReportEntry::scan(item.relative_path, Some(item.size), None);
         if hash {
             let md5 = hash::local_md5(&dir.join(&entry.relative_path))
                 .map_err(|e| CliError(format!("failed to read {} for hashing: {e}", entry.relative_path)))?;
@@ -267,10 +268,10 @@ fn scan_remote<C: FtpConnection>(
     exclude: &ExcludeSet,
     hash: bool,
     progress: &mut Progress,
-) -> Result<Vec<DiffEntry>, CliError> {
+) -> Result<Vec<ReportEntry>, CliError> {
     let mut entries = Vec::new();
     for item in remote::walk_remote(conn, remote_dir, exclude, progress.as_deref_mut())? {
-        let mut entry = DiffEntry::new(item.relative_path, DiffStatus::Scan, None, Some(item.size));
+        let mut entry = ReportEntry::scan(item.relative_path, None, Some(item.size));
         if hash {
             let remote_path = remote::join_remote(remote_dir, &entry.relative_path);
             let md5 = hash::remote_md5(conn, &remote_path)
@@ -298,7 +299,7 @@ fn run_build(cli: &Cli, json_config: &JsonConfig) -> Result<i32, CliError> {
     };
 
     for entry in &entries {
-        println!("{}", output::format_entry(entry));
+        println!("{}", output::format_scan_entry(entry));
     }
     println!("Scanned {} entries.", entries.len());
 
@@ -342,7 +343,7 @@ mod tests {
         let exclude = excludes(&["*.tmp"]);
 
         let plain = scan_local(dir.path(), &exclude, false, &mut None).unwrap();
-        assert_eq!(plain, vec![DiffEntry::new("a.txt", DiffStatus::Scan, Some(5), None)]);
+        assert_eq!(plain, vec![ReportEntry::scan("a.txt", Some(5), None)]);
 
         let hashed = scan_local(dir.path(), &exclude, true, &mut None).unwrap();
         assert_eq!(hashed[0].local_md5.as_deref(), Some(HELLO_MD5));
@@ -354,7 +355,7 @@ mod tests {
         let mut conn = server();
 
         let plain = scan_remote(&mut conn, "/remote", &excludes(&["*.tmp"]), false, &mut None).unwrap();
-        assert_eq!(plain, vec![DiffEntry::new("a.txt", DiffStatus::Scan, None, Some(5))]);
+        assert_eq!(plain, vec![ReportEntry::scan("a.txt", None, Some(5))]);
 
         let hashed = scan_remote(&mut conn, "/remote", &excludes(&["*.tmp"]), true, &mut None).unwrap();
         assert_eq!(hashed[0].remote_md5.as_deref(), Some(HELLO_MD5));

@@ -15,20 +15,16 @@ pub enum DiffStatus {
     HashMismatch,
     /// File matches on both sides.
     Match,
-    /// Scanned by `--build`, not compared against the other side (that
-    /// side wasn't scanned at all).
-    Scan,
 }
 
 impl DiffStatus {
     /// Every status, in declaration order.
-    pub const ALL: [DiffStatus; 6] = [
+    pub const ALL: [DiffStatus; 5] = [
         DiffStatus::LocalOnly,
         DiffStatus::RemoteOnly,
         DiffStatus::SizeMismatch,
         DiffStatus::HashMismatch,
         DiffStatus::Match,
-        DiffStatus::Scan,
     ];
 
     /// The name written to the CSV `status` column and accepted by
@@ -40,7 +36,6 @@ impl DiffStatus {
             DiffStatus::SizeMismatch => "SizeMismatch",
             DiffStatus::HashMismatch => "HashMismatch",
             DiffStatus::Match => "Match",
-            DiffStatus::Scan => "Scan",
         }
     }
 }

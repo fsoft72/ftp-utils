@@ -189,11 +189,12 @@ pub fn delete_local(local_dir: &Path, rows: &[&StatusRow]) -> Vec<OpResult> {
 mod tests {
     use super::*;
     
+    use ftp_utils_core::csv_source::ReportStatus;
     use ftp_utils_core::remote::RawRemoteEntry;
     use ftp_utils_core::testing::MockFtpConnection;
 
     fn row(relative_path: &str) -> StatusRow {
-        StatusRow { relative_path: relative_path.to_string(), status: ftp_utils_core::DiffStatus::RemoteOnly }
+        StatusRow { relative_path: relative_path.to_string(), status: ReportStatus::Diff(ftp_utils_core::DiffStatus::RemoteOnly) }
     }
 
     #[test]

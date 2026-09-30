@@ -44,12 +44,87 @@ fn _row_path(record: &csv::StringRecord, path_idx: usize) -> Result<String, CsvS
     Ok(relative_path)
 }
 
+/// The `status` column of a report: the outcome of a comparison, or
+/// `Scan` for a row written by `ftpdiff --build`, which scanned one side
+/// without comparing it to anything.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReportStatus {
+    Diff(DiffStatus),
+    Scan,
+}
+
+impl ReportStatus {
+    /// The name written to the CSV `status` column.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ReportStatus::Diff(status) => status.as_str(),
+            ReportStatus::Scan => "Scan",
+        }
+    }
+}
+
+impl std::fmt::Display for ReportStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl std::str::FromStr for ReportStatus {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        if value == "Scan" {
+            return Ok(ReportStatus::Scan);
+        }
+        value.parse::<DiffStatus>().map(ReportStatus::Diff)
+    }
+}
+
+/// One row of a CSV report, as written by `write_report`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ReportEntry {
+    pub relative_path: String,
+    pub status: ReportStatus,
+    pub local_size: Option<u64>,
+    pub remote_size: Option<u64>,
+    pub local_md5: Option<String>,
+    pub remote_md5: Option<String>,
+}
+
+impl ReportEntry {
+    /// A `Scan` row for `--build`: exactly one side's size (and, later,
+    /// hash) is known.
+    pub fn scan(relative_path: impl Into<String>, local_size: Option<u64>, remote_size: Option<u64>) -> Self {
+        Self {
+            relative_path: relative_path.into(),
+            status: ReportStatus::Scan,
+            local_size,
+            remote_size,
+            local_md5: None,
+            remote_md5: None,
+        }
+    }
+}
+
+impl From<&DiffEntry> for ReportEntry {
+    fn from(entry: &DiffEntry) -> Self {
+        Self {
+            relative_path: entry.relative_path.clone(),
+            status: ReportStatus::Diff(entry.status),
+            local_size: entry.local_size,
+            remote_size: entry.remote_size,
+            local_md5: entry.local_md5.clone(),
+            remote_md5: entry.remote_md5.clone(),
+        }
+    }
+}
+
 /// The path and status of one report row: all ftpops needs to decide what
 /// to operate on.
 #[derive(Debug, Clone, PartialEq)]
 pub struct StatusRow {
     pub relative_path: String,
-    pub status: DiffStatus,
+    pub status: ReportStatus,
 }
 
 /// Reads every row's `path` and `status` from a report (other columns are
@@ -67,7 +142,7 @@ pub fn read_status_rows(path: &Path) -> Result<Vec<StatusRow>, CsvSourceError> {
             .get(status_idx)
             .ok_or_else(|| CsvSourceError("row missing 'status' value".to_string()))?;
         let status = status_text
-            .parse::<DiffStatus>()
+            .parse::<ReportStatus>()
             .map_err(|e| CsvSourceError(format!("row for '{relative_path}': {e}")))?;
         rows.push(StatusRow { relative_path, status });
     }
@@ -77,7 +152,7 @@ pub fn read_status_rows(path: &Path) -> Result<Vec<StatusRow>, CsvSourceError> {
 
 /// Writes `entries` to `path` as a CSV report with the columns
 /// `path,status,local_size,remote_size,local_md5,remote_md5`.
-pub fn write_report(path: &Path, entries: &[DiffEntry]) -> std::io::Result<()> {
+pub fn write_report(path: &Path, entries: &[ReportEntry]) -> std::io::Result<()> {
     let to_io = |e: csv::Error| std::io::Error::other(e);
 
     let mut writer = csv::Writer::from_path(path).map_err(to_io)?;
@@ -259,7 +334,7 @@ mod tests {
     fn writes_header_and_rows() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("report.csv");
-        let entries = vec![DiffEntry::new("a.txt", DiffStatus::SizeMismatch, Some(10), Some(20))];
+        let entries = vec![ReportEntry::from(&DiffEntry::new("a.txt", DiffStatus::SizeMismatch, Some(10), Some(20)))];
 
         write_report(&path, &entries).unwrap();
 
@@ -270,13 +345,25 @@ mod tests {
     }
 
     #[test]
+    fn report_status_names_round_trip() {
+        for status in DiffStatus::ALL.map(ReportStatus::Diff).into_iter().chain([ReportStatus::Scan]) {
+            assert_eq!(status.to_string().parse::<ReportStatus>(), Ok(status));
+        }
+        assert!("Bogus".parse::<ReportStatus>().is_err());
+    }
+
+    #[test]
     fn written_report_can_be_read_back() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("report.csv");
         let mut entry = DiffEntry::new("sub/a.txt", DiffStatus::Match, Some(3), Some(3));
         entry.local_md5 = Some("abc".to_string());
         entry.remote_md5 = Some("abc".to_string());
-        let entries = vec![entry, DiffEntry::new("b.txt", DiffStatus::RemoteOnly, None, Some(9))];
+        let entries = vec![
+            ReportEntry::from(&entry),
+            ReportEntry::from(&DiffEntry::new("b.txt", DiffStatus::RemoteOnly, None, Some(9))),
+            ReportEntry::scan("c.txt", Some(1), None),
+        ];
 
         write_report(&path, &entries).unwrap();
 
@@ -284,12 +371,13 @@ mod tests {
         assert_eq!(
             rows,
             vec![
-                StatusRow { relative_path: "sub/a.txt".to_string(), status: DiffStatus::Match },
-                StatusRow { relative_path: "b.txt".to_string(), status: DiffStatus::RemoteOnly },
+                StatusRow { relative_path: "sub/a.txt".to_string(), status: ReportStatus::Diff(DiffStatus::Match) },
+                StatusRow { relative_path: "b.txt".to_string(), status: ReportStatus::Diff(DiffStatus::RemoteOnly) },
+                StatusRow { relative_path: "c.txt".to_string(), status: ReportStatus::Scan },
             ]
         );
         let (local, known) = read_local_entries(&path).unwrap();
-        assert_eq!(local.len(), 1);
+        assert_eq!(local.len(), 2); // sub/a.txt and the scanned c.txt both have a local size
         assert_eq!(known.get("sub/a.txt"), Some(&"abc".to_string()));
     }
 
