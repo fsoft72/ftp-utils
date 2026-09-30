@@ -89,6 +89,34 @@ impl SuppaFtpConnection {
     }
 }
 
+/// Parses raw `LIST` output lines into entries. Blank lines and the
+/// `total N` header some servers emit are skipped, as are `.`/`..`. Any
+/// other line that neither the POSIX nor the DOS parser understands is an
+/// error: dropping it silently would make the file vanish from the remote
+/// tree and produce false `LocalOnly` results.
+fn parse_listing(lines: &[String]) -> Result<Vec<RawRemoteEntry>, FtpConnectionError> {
+    let mut entries = Vec::new();
+    for line in lines {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with("total ") {
+            continue;
+        }
+        let file = ListParser::parse_posix(trimmed)
+            .or_else(|_| ListParser::parse_dos(trimmed))
+            .map_err(|e| FtpConnectionError(format!("cannot parse directory listing line '{line}': {e}")))?;
+        let name = file.name();
+        if name == "." || name == ".." {
+            continue;
+        }
+        entries.push(RawRemoteEntry {
+            name: name.to_string(),
+            is_dir: file.is_directory(),
+            size: file.size() as u64,
+        });
+    }
+    Ok(entries)
+}
+
 impl FtpConnection for SuppaFtpConnection {
     fn list_dir(&mut self, path: &str) -> Result<Vec<RawRemoteEntry>, FtpConnectionError> {
         let lines = match self {
@@ -97,22 +125,7 @@ impl FtpConnection for SuppaFtpConnection {
         }
         .map_err(|e| FtpConnectionError(e.to_string()))?;
 
-        let mut entries = Vec::new();
-        for line in lines {
-            let Ok(file) = ListParser::parse_posix(&line) else {
-                continue;
-            };
-            let name = file.name();
-            if name == "." || name == ".." {
-                continue;
-            }
-            entries.push(RawRemoteEntry {
-                name: name.to_string(),
-                is_dir: file.is_directory(),
-                size: file.size() as u64,
-            });
-        }
-        Ok(entries)
+        parse_listing(&lines)
     }
 
     fn try_hash(&mut self, _path: &str) -> Option<String> {
@@ -156,5 +169,56 @@ impl FtpConnection for SuppaFtpConnection {
             SuppaFtpConnection::Tls(stream) => stream.mkdir(path),
         }
         .map_err(|e| FtpConnectionError(e.to_string()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn lines(input: &[&str]) -> Vec<String> {
+        input.iter().map(|l| l.to_string()).collect()
+    }
+
+    #[test]
+    fn parses_posix_files_and_directories() {
+        let entries = parse_listing(&lines(&[
+            "-rw-r--r--   1 user group      1234 Jan 10 12:00 a.txt",
+            "drwxr-xr-x   2 user group      4096 Jan 10 12:00 sub",
+        ]))
+        .unwrap();
+
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].name, "a.txt");
+        assert!(!entries[0].is_dir);
+        assert_eq!(entries[0].size, 1234);
+        assert_eq!(entries[1].name, "sub");
+        assert!(entries[1].is_dir);
+    }
+
+    #[test]
+    fn skips_blank_total_dot_and_dotdot_lines() {
+        let entries = parse_listing(&lines(&[
+            "total 8",
+            "",
+            "drwxr-xr-x   2 user group      4096 Jan 10 12:00 .",
+            "drwxr-xr-x   2 user group      4096 Jan 10 12:00 ..",
+            "-rw-r--r--   1 user group         1 Jan 10 12:00 keep.txt",
+        ]))
+        .unwrap();
+
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].name, "keep.txt");
+    }
+
+    #[test]
+    fn errors_on_unparseable_line_instead_of_dropping_it() {
+        let result = parse_listing(&lines(&[
+            "-rw-r--r--   1 user group         1 Jan 10 12:00 ok.txt",
+            "this is not a listing line",
+        ]));
+
+        let err = result.unwrap_err();
+        assert!(err.0.contains("this is not a listing line"));
     }
 }
