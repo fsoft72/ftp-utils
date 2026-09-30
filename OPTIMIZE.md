@@ -19,9 +19,9 @@
   - File(s): `crates/ftp-utils-core/src/hash.rs`, `crates/ftp-utils-core/src/ftp_client.rs`, `crates/ftp-utils-core/src/remote.rs`, `tools/ftpops/src/ops.rs`, `tools/ftpdiff/src/main.rs`
 - [ ] **`try_hash` is a stub, every remote hash downloads the whole file** - the trait method always returns `None`, so `--hash` re-downloads every size-matching file. Implement `XMD5`/`MD5`/`XSHA`-style commands via suppaftp's custom command support (or remove the method and document the download cost) and cache the capability probe per connection.
   - File(s): `crates/ftp-utils-core/src/ftp_client.rs`, `crates/ftp-utils-core/src/remote.rs`
-- [ ] **`ensure_remote_dir` issues a `LIST` per path component per uploaded file** - uploading N files of depth D costs O(N*D) round trips. Keep a `HashSet` of directories already known to exist (per run) and only list/create on a miss, or just try `MKD` and ignore "already exists".
+- [x] **`ensure_remote_dir` issues a `LIST` per path component per uploaded file** - uploading N files of depth D costs O(N*D) round trips. Keep a `HashSet` of directories already known to exist (per run) and only list/create on a miss, or just try `MKD` and ignore "already exists".
   - File(s): `crates/ftp-utils-core/src/remote.rs`, `tools/ftpops/src/ops.rs`
-- [ ] **`copy_to_remote --skip-existing` lists the parent directory for every row** - the same directory is listed again for each file. Group rows by parent and list each directory once.
+- [x] **`copy_to_remote --skip-existing` lists the parent directory for every row** - the same directory is listed again for each file. Group rows by parent and list each directory once.
   - File(s): `tools/ftpops/src/ops.rs`
 - [ ] **Split `ftpdiff::run` / `run_build` god functions** - `run` (~170 lines) mixes config loading, live/CSV source loading, connecting, hashing, printing and CSV writing with a repeated `match ... { Err(e) => { eprintln!; return 2 } }` pattern. Extract `load_local_side`, `load_remote_side`, `report` and use a `Result<_, CliError>` with `?` and a single exit-code mapping in `main`.
   - File(s): `tools/ftpdiff/src/main.rs`

@@ -105,3 +105,4 @@
 - FTP listing parser now errors on unparseable lines (skipping only blank, `total`, `.`, `..`) and falls back to the DOS format.
 - `ftpops copy --skip-existing` now reports a failure instead of overwriting when the remote existence check fails.
 - `ftpops delete` now asks for confirmation (`--yes` to skip); aborts with exit code 2 otherwise.
+- `ftpops copy --to remote` caches known remote directories and per-directory listings (`ensure_remote_dir_cached`), and creates parents before the `--skip-existing` check.

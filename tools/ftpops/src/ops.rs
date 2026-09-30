@@ -1,6 +1,7 @@
 //! Copy and delete operations, executed against CSV rows already
 //! filtered by status.
 
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use ftp_utils_core::FtpConnection;
@@ -64,6 +65,8 @@ pub fn copy_to_local<C: FtpConnection>(
 /// Uploads each row's local file to the remote directory, creating
 /// missing remote parent directories. Skips (without overwriting) a row
 /// whose remote destination already exists when `skip_existing` is true.
+/// Directory creation and existence listings are cached per run, so each
+/// remote directory is listed at most once.
 pub fn copy_to_remote<C: FtpConnection>(
     conn: &mut C,
     remote_dir: &str,
@@ -71,46 +74,58 @@ pub fn copy_to_remote<C: FtpConnection>(
     rows: &[&CsvRow],
     skip_existing: bool,
 ) -> Vec<OpResult> {
-    rows.iter()
-        .map(|row| {
-            let remote_path = format!("{remote_dir}/{}", row.relative_path);
+    let mut known_dirs: HashSet<String> = HashSet::new();
+    let mut listed_files: HashMap<String, HashSet<String>> = HashMap::new();
+    let mut results = Vec::with_capacity(rows.len());
 
-            if skip_existing {
-                let (remote_parent, file_name) = remote_path.rsplit_once('/').unwrap_or(("", &remote_path));
-                let remote_parent = if remote_parent.is_empty() { "/" } else { remote_parent };
-                match conn.list_dir(remote_parent) {
-                    Ok(entries) if entries.iter().any(|e| !e.is_dir && e.name == file_name) => {
-                        return OpResult { relative_path: row.relative_path.clone(), outcome: OpOutcome::Skipped };
-                    }
-                    Ok(_) => {}
-                    // A failed listing must not be read as "does not exist":
-                    // that would overwrite the file --skip-existing protects.
-                    Err(e) => {
-                        return OpResult {
-                            relative_path: row.relative_path.clone(),
-                            outcome: OpOutcome::Failed(format!("cannot check existing file: {e}")),
-                        };
-                    }
-                }
+    for row in rows {
+        let remote_path = format!("{remote_dir}/{}", row.relative_path);
+        let local_path = local_dir.join(&row.relative_path);
+
+        let outcome = (|| -> Result<OpOutcome, String> {
+            // Parents first: a listing failure below is then a real error,
+            // not just a directory that doesn't exist yet.
+            conn.ensure_remote_dir_cached(&remote_path, &mut known_dirs).map_err(|e| e.to_string())?;
+
+            if skip_existing && _remote_file_exists(conn, &remote_path, &mut listed_files)? {
+                return Ok(OpOutcome::Skipped);
             }
 
-            let local_path = local_dir.join(&row.relative_path);
-            let outcome = (|| -> Result<(), String> {
-                let data = std::fs::read(&local_path).map_err(|e| e.to_string())?;
-                conn.ensure_remote_dir(&remote_path).map_err(|e| e.to_string())?;
-                conn.store_from_buffer(&remote_path, &data).map_err(|e| e.to_string())?;
-                Ok(())
-            })();
+            let data = std::fs::read(&local_path).map_err(|e| e.to_string())?;
+            conn.store_from_buffer(&remote_path, &data).map_err(|e| e.to_string())?;
+            Ok(OpOutcome::Copied)
+        })();
 
-            OpResult {
-                relative_path: row.relative_path.clone(),
-                outcome: match outcome {
-                    Ok(()) => OpOutcome::Copied,
-                    Err(e) => OpOutcome::Failed(e),
-                },
-            }
-        })
-        .collect()
+        results.push(OpResult {
+            relative_path: row.relative_path.clone(),
+            outcome: outcome.unwrap_or_else(OpOutcome::Failed),
+        });
+    }
+
+    results
+}
+
+/// Checks whether `remote_path` is an existing file, listing its parent
+/// directory only the first time it is seen (results live in `listed`).
+/// A failed listing is an error, never "does not exist": that would
+/// overwrite the files `--skip-existing` is meant to protect.
+fn _remote_file_exists<C: FtpConnection>(
+    conn: &mut C,
+    remote_path: &str,
+    listed: &mut HashMap<String, HashSet<String>>,
+) -> Result<bool, String> {
+    let (parent, file_name) = remote_path.rsplit_once('/').unwrap_or(("", remote_path));
+    let parent = if parent.is_empty() { "/" } else { parent };
+
+    if !listed.contains_key(parent) {
+        let entries = conn
+            .list_dir(parent)
+            .map_err(|e| format!("cannot check existing file: {e}"))?;
+        let files = entries.into_iter().filter(|e| !e.is_dir).map(|e| e.name).collect();
+        listed.insert(parent.to_string(), files);
+    }
+
+    Ok(listed[parent].contains(file_name))
 }
 
 /// Deletes each row's remote file.
@@ -324,6 +339,56 @@ mod tests {
 
         assert!(matches!(results[0].outcome, OpOutcome::Failed(_)));
         assert!(conn.0.stored.is_empty());
+    }
+
+    #[test]
+    fn copy_to_remote_lists_each_directory_once_with_skip_existing() {
+        struct CountingConnection {
+            inner: MockConnection,
+            list_calls: Vec<String>,
+        }
+        impl FtpConnection for CountingConnection {
+            fn list_dir(&mut self, path: &str) -> Result<Vec<RawRemoteEntry>, FtpConnectionError> {
+                self.list_calls.push(path.to_string());
+                self.inner.list_dir(path)
+            }
+            fn try_hash(&mut self, p: &str) -> Option<String> {
+                self.inner.try_hash(p)
+            }
+            fn retr_to_buffer(&mut self, p: &str) -> Result<Vec<u8>, FtpConnectionError> {
+                self.inner.retr_to_buffer(p)
+            }
+            fn store_from_buffer(&mut self, p: &str, d: &[u8]) -> Result<(), FtpConnectionError> {
+                self.inner.store_from_buffer(p, d)
+            }
+            fn delete(&mut self, p: &str) -> Result<(), FtpConnectionError> {
+                self.inner.delete(p)
+            }
+            fn create_dir(&mut self, p: &str) -> Result<(), FtpConnectionError> {
+                self.inner.create_dir(p)
+            }
+        }
+
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("sub")).unwrap();
+        for name in ["sub/a.txt", "sub/b.txt", "sub/c.txt"] {
+            std::fs::write(dir.path().join(name), b"x").unwrap();
+        }
+        let mut inner = MockConnection::default();
+        inner.listings.insert("/".to_string(), vec![]);
+        let mut conn = CountingConnection { inner, list_calls: Vec::new() };
+
+        let rows = vec![row("sub/a.txt"), row("sub/b.txt"), row("sub/c.txt")];
+        let refs: Vec<&CsvRow> = rows.iter().collect();
+
+        let results = copy_to_remote(&mut conn, "/remote", dir.path(), &refs, true);
+
+        assert!(results.iter().all(|r| r.outcome == OpOutcome::Copied));
+        // "/" and "/remote" are listed once each while creating parents;
+        // "/remote/sub" is listed once, by the existence check.
+        let sub_listings = conn.list_calls.iter().filter(|p| *p == "/remote/sub").count();
+        assert_eq!(sub_listings, 1, "calls: {:?}", conn.list_calls);
+        assert_eq!(conn.list_calls.iter().filter(|p| *p == "/").count(), 1);
     }
 
     #[test]

@@ -1,6 +1,8 @@
 //! Remote directory walking over an abstract `FtpConnection`, so the
 //! comparison logic never depends directly on a concrete FTP library.
 
+use std::collections::HashSet;
+
 use crate::exclude::is_excluded;
 
 /// One entry as reported by a single remote directory listing (before
@@ -53,7 +55,16 @@ pub trait FtpConnection {
     /// file; only its parent directories are created. Built generically
     /// on `list_dir` and `create_dir`, so any implementer gets it for
     /// free without needing its own recursive-mkdir logic.
-    fn ensure_remote_dir(&mut self, path: &str) -> Result<(), FtpConnectionError> {
+    ///
+    /// Directories recorded in `known_dirs` are assumed to exist and cost
+    /// no round trip; every directory this call confirms or creates is
+    /// added to it. Share one set across many calls (e.g. a bulk upload)
+    /// so each directory is listed at most once.
+    fn ensure_remote_dir_cached(
+        &mut self,
+        path: &str,
+        known_dirs: &mut HashSet<String>,
+    ) -> Result<(), FtpConnectionError> {
         let parent = match path.rfind('/') {
             Some(idx) if idx > 0 => &path[..idx],
             _ => return Ok(()),
@@ -65,15 +76,23 @@ pub trait FtpConnection {
             current.push('/');
             current.push_str(component);
 
-            let existing = self.list_dir(&listing_parent)?;
-            if existing.iter().any(|e| e.is_dir && e.name == component) {
+            if known_dirs.contains(&current) {
                 continue;
             }
 
-            self.create_dir(&current)?;
+            let existing = self.list_dir(&listing_parent)?;
+            if !existing.iter().any(|e| e.is_dir && e.name == component) {
+                self.create_dir(&current)?;
+            }
+            known_dirs.insert(current.clone());
         }
 
         Ok(())
+    }
+
+    /// Like `ensure_remote_dir_cached`, with no memory between calls.
+    fn ensure_remote_dir(&mut self, path: &str) -> Result<(), FtpConnectionError> {
+        self.ensure_remote_dir_cached(path, &mut HashSet::new())
     }
 }
 
@@ -259,6 +278,35 @@ mod tests {
         let mut conn = MockFtpConnection { listings, created_dirs: Vec::new() };
 
         conn.ensure_remote_dir("/a/b/file.txt").unwrap();
+
+        assert_eq!(conn.created_dirs, vec!["/a/b".to_string()]);
+    }
+
+    #[test]
+    fn ensure_remote_dir_cached_skips_directories_already_known() {
+        let mut listings = HashMap::new();
+        listings.insert("/".to_string(), vec![]);
+        let mut conn = MockFtpConnection { listings, created_dirs: Vec::new() };
+        let mut known = HashSet::new();
+
+        conn.ensure_remote_dir_cached("/a/b/one.txt", &mut known).unwrap();
+        conn.ensure_remote_dir_cached("/a/b/two.txt", &mut known).unwrap();
+        conn.ensure_remote_dir_cached("/a/c/three.txt", &mut known).unwrap();
+
+        assert_eq!(conn.created_dirs, vec!["/a".to_string(), "/a/b".to_string(), "/a/c".to_string()]);
+        assert!(known.contains("/a") && known.contains("/a/b") && known.contains("/a/c"));
+    }
+
+    #[test]
+    fn ensure_remote_dir_cached_does_not_relist_known_directories() {
+        // "/a" has no listing entry: listing it would fail, so this only
+        // passes if the cache avoids the round trip.
+        let mut listings = HashMap::new();
+        listings.insert("/a".to_string(), vec![]);
+        let mut conn = MockFtpConnection { listings, created_dirs: Vec::new() };
+        let mut known: HashSet<String> = ["/a".to_string()].into();
+
+        conn.ensure_remote_dir_cached("/a/b/file.txt", &mut known).unwrap();
 
         assert_eq!(conn.created_dirs, vec!["/a/b".to_string()]);
     }
