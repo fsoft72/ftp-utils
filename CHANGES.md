@@ -113,3 +113,4 @@
 - `ftpops copy --to local` downloads to a temporary `.<name>.ftpops-part` file and renames it on success; failures keep the previous file.
 - Added `remote::join_remote` (no more `//` for `--remote-dir /` or trailing slashes); local metadata errors name the file.
 - Exclude patterns are compiled once into `ExcludeSet`; invalid globs are a config error (exit 2). Directories fully covered by a `<dir>/*` or `<dir>/**` pattern are no longer walked (local and remote).
+- Added `DiffEntry::new` and replaced repeated struct literals; refreshed the stale `diff.rs` module doc.

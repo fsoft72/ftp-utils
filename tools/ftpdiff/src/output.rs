@@ -61,14 +61,7 @@ mod tests {
     use super::*;
 
     fn entry(relative_path: &str, status: DiffStatus) -> DiffEntry {
-        DiffEntry {
-            relative_path: relative_path.to_string(),
-            status,
-            local_size: None,
-            remote_size: None,
-            local_md5: None,
-            remote_md5: None,
-        }
+        DiffEntry::new(relative_path, status, None, None)
     }
 
     #[test]

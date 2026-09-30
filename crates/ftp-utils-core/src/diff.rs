@@ -1,6 +1,6 @@
 //! Diff types produced when comparing a local directory tree against a
-//! remote FTP/FTPS directory tree. Comparison logic will be implemented
-//! according to the implementation plan derived from the design spec.
+//! remote FTP/FTPS directory tree. `compare::compare_entries` produces
+//! them and `hash::apply_hash_comparison` refines them with hashes.
 
 /// Outcome of comparing one relative path present locally and/or remotely.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -31,9 +31,32 @@ pub struct DiffEntry {
     pub remote_md5: Option<String>,
 }
 
+impl DiffEntry {
+    /// Creates an entry with the given sizes and no hashes yet (those are
+    /// filled in later by `hash::apply_hash_comparison` or `--build`).
+    pub fn new(
+        relative_path: impl Into<String>,
+        status: DiffStatus,
+        local_size: Option<u64>,
+        remote_size: Option<u64>,
+    ) -> Self {
+        Self { relative_path: relative_path.into(), status, local_size, remote_size, local_md5: None, remote_md5: None }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn new_leaves_hashes_unset() {
+        let entry = DiffEntry::new("a.txt", DiffStatus::SizeMismatch, Some(1), Some(2));
+
+        assert_eq!(entry.relative_path, "a.txt");
+        assert_eq!(entry.status, DiffStatus::SizeMismatch);
+        assert_eq!((entry.local_size, entry.remote_size), (Some(1), Some(2)));
+        assert_eq!((entry.local_md5, entry.remote_md5), (None, None));
+    }
 
     #[test]
     fn diff_entries_with_same_fields_are_equal() {

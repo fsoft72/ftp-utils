@@ -15,7 +15,7 @@ use std::time::Duration;
 use clap::Parser;
 use ftp_utils_core::compare::compare_entries;
 use ftp_utils_core::ftp_client::SuppaFtpConnection;
-use ftp_utils_core::{csv_source, hash, local, remote, DiffStatus};
+use ftp_utils_core::{csv_source, hash, local, remote, DiffEntry, DiffStatus};
 
 use cli::Cli;
 use config::{LocalSource, RemoteSource};
@@ -209,7 +209,7 @@ fn run_build(cli: &Cli, json_config: &config::JsonConfig) -> i32 {
         None
     };
 
-    let entries: Vec<ftp_utils_core::DiffEntry> = match &build.side {
+    let entries: Vec<DiffEntry> = match &build.side {
         config::BuildSide::Local(dir) => {
             let scanned = match local::walk_local_dir(dir, &build.exclude, progress.as_deref_mut()) {
                 Ok(e) => e,
@@ -233,14 +233,9 @@ fn run_build(cli: &Cli, json_config: &config::JsonConfig) -> i32 {
                     None
                 };
 
-                out.push(ftp_utils_core::DiffEntry {
-                    relative_path: item.relative_path,
-                    status: DiffStatus::Scan,
-                    local_size: Some(item.size),
-                    remote_size: None,
-                    local_md5,
-                    remote_md5: None,
-                });
+                let mut entry = DiffEntry::new(item.relative_path, DiffStatus::Scan, Some(item.size), None);
+                entry.local_md5 = local_md5;
+                out.push(entry);
             }
             out
         }
@@ -288,14 +283,9 @@ fn run_build(cli: &Cli, json_config: &config::JsonConfig) -> i32 {
                     None
                 };
 
-                out.push(ftp_utils_core::DiffEntry {
-                    relative_path: item.relative_path,
-                    status: DiffStatus::Scan,
-                    local_size: None,
-                    remote_size: Some(item.size),
-                    local_md5: None,
-                    remote_md5,
-                });
+                let mut entry = DiffEntry::new(item.relative_path, DiffStatus::Scan, None, Some(item.size));
+                entry.remote_md5 = remote_md5;
+                out.push(entry);
             }
 
             conn.close();

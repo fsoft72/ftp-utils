@@ -42,7 +42,7 @@
   - File(s): `crates/ftp-utils-core/src/csv_source.rs`, `tools/ftpops/src/csv_input.rs`, `tools/ftpops/src/filter.rs`, `tools/ftpdiff/src/csv_report.rs`
 - [ ] **Remote and connection settings duplicated across types** - `RemoteSource::Live`, `BuildSide::Remote`, `PartialConnection` and `EffectiveConnection` all repeat host/port/user/remote_dir/ftps/insecure_tls, and `merge`/`merge_build` repeat the "require host, user, remote-dir" checks. Extract a `RemoteParams` struct and one `require_remote(&PartialConnection)` function.
   - File(s): `tools/ftpdiff/src/config.rs`, `crates/ftp-utils-core/src/connection.rs`
-- [ ] **`DiffEntry` construction repeated four times** - `compare_entries` builds nearly identical literals with `None` md5 fields for each case, and tests do the same. Add `DiffEntry::new(path, status, local_size, remote_size)` (or per-status constructors).
+- [x] **`DiffEntry` construction repeated four times** - `compare_entries` builds nearly identical literals with `None` md5 fields for each case, and tests do the same. Add `DiffEntry::new(path, status, local_size, remote_size)` (or per-status constructors).
   - File(s): `crates/ftp-utils-core/src/compare.rs`, `crates/ftp-utils-core/src/diff.rs`, `tools/ftpdiff/src/main.rs`
 - [x] **FTPS and plain connect branches are copy-pasted** - the two arms of `SuppaFtpConnection::connect` (login, `transfer_type`) and every `match self { Plain(..) => .., Tls(..) => .. }` in the trait impl duplicate code. Use a small macro or a helper that dispatches on the enum once.
   - File(s): `crates/ftp-utils-core/src/ftp_client.rs`
@@ -61,7 +61,7 @@
   - File(s): `crates/ftp-utils-core/src/ftp_client.rs`, `tools/ftpdiff/src/main.rs`, `tools/ftpops/src/main.rs`
 - [ ] **Duplicated `run_copy` / `run_delete` skeleton and magic exit codes** - both load config, read/filter rows, handle dry-run, print results and map failures to `0/1`, and the numbers `0/1/2` are scattered literals across both binaries. Define `const EXIT_OK/EXIT_DIFF/EXIT_ERROR` (shared in core) and factor the shared flow.
   - File(s): `tools/ftpops/src/main.rs`, `tools/ftpdiff/src/main.rs`
-- [ ] **Stale module doc and default port literal** - `diff.rs` still says comparison "will be implemented according to the implementation plan", and the default port `21` is a bare literal in `merge_connection_partial`. Update the doc and add `const DEFAULT_FTP_PORT: u16 = 21;`.
+- [x] **Stale module doc and default port literal** - `diff.rs` still says comparison "will be implemented according to the implementation plan", and the default port `21` is a bare literal in `merge_connection_partial`. Update the doc and add `const DEFAULT_FTP_PORT: u16 = 21;`.
   - File(s): `crates/ftp-utils-core/src/diff.rs`, `crates/ftp-utils-core/src/connection.rs`
 - [ ] **`DiffStatus::Scan` leaks into compare-only code** - `summarize` needs a dead `Scan => {}` arm and `format_entry` handles a status that `compare_entries` never produces. Model build output as its own type (or split the enum) so each mode only sees valid states.
   - File(s): `crates/ftp-utils-core/src/diff.rs`, `tools/ftpdiff/src/output.rs`

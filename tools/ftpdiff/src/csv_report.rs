@@ -43,14 +43,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("report.csv");
 
-        let entries = vec![DiffEntry {
-            relative_path: "a.txt".to_string(),
-            status: DiffStatus::SizeMismatch,
-            local_size: Some(10),
-            remote_size: Some(20),
-            local_md5: None,
-            remote_md5: None,
-        }];
+        let entries = vec![DiffEntry::new("a.txt", DiffStatus::SizeMismatch, Some(10), Some(20))];
 
         write_csv(&path, &entries).unwrap();
 

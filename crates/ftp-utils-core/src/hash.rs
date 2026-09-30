@@ -133,14 +133,7 @@ mod tests {
     }
 
     fn entry(relative_path: &str) -> DiffEntry {
-        DiffEntry {
-            relative_path: relative_path.to_string(),
-            status: DiffStatus::Match,
-            local_size: Some(5),
-            remote_size: Some(5),
-            local_md5: None,
-            remote_md5: None,
-        }
+        DiffEntry::new(relative_path, DiffStatus::Match, Some(5), Some(5))
     }
 
     #[test]
@@ -240,14 +233,7 @@ mod tests {
     #[test]
     fn leaves_non_match_entries_untouched() {
         let dir = tempfile::tempdir().unwrap();
-        let mut entries = vec![DiffEntry {
-            relative_path: "only-local.txt".to_string(),
-            status: DiffStatus::LocalOnly,
-            local_size: Some(5),
-            remote_size: None,
-            local_md5: None,
-            remote_md5: None,
-        }];
+        let mut entries = vec![DiffEntry::new("only-local.txt", DiffStatus::LocalOnly, Some(5), None)];
         let mut conn = MockConnection { hash: None, remote_bytes: Vec::new() };
 
         apply_hash_comparison(
@@ -272,14 +258,7 @@ mod tests {
 
         let mut entries = vec![
             entry("f.txt"),
-            DiffEntry {
-                relative_path: "only-local.txt".to_string(),
-                status: DiffStatus::LocalOnly,
-                local_size: Some(5),
-                remote_size: None,
-                local_md5: None,
-                remote_md5: None,
-            },
+            DiffEntry::new("only-local.txt", DiffStatus::LocalOnly, Some(5), None),
         ];
         let mut conn = MockConnection { hash: None, remote_bytes: b"hello".to_vec() };
 

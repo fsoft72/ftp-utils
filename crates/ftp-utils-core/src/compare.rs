@@ -31,38 +31,12 @@ pub fn compare_entries(local: &[LocalEntry], remote: &[RemoteEntry]) -> Vec<Diff
             let remote_entry = remote_by_path.remove(path);
 
             match (local_entry, remote_entry) {
-                (Some(l), None) => DiffEntry {
-                    relative_path: path.to_string(),
-                    status: DiffStatus::LocalOnly,
-                    local_size: Some(l.size),
-                    remote_size: None,
-                    local_md5: None,
-                    remote_md5: None,
-                },
-                (None, Some(r)) => DiffEntry {
-                    relative_path: path.to_string(),
-                    status: DiffStatus::RemoteOnly,
-                    local_size: None,
-                    remote_size: Some(r.size),
-                    local_md5: None,
-                    remote_md5: None,
-                },
-                (Some(l), Some(r)) if l.size == r.size => DiffEntry {
-                    relative_path: path.to_string(),
-                    status: DiffStatus::Match,
-                    local_size: Some(l.size),
-                    remote_size: Some(r.size),
-                    local_md5: None,
-                    remote_md5: None,
-                },
-                (Some(l), Some(r)) => DiffEntry {
-                    relative_path: path.to_string(),
-                    status: DiffStatus::SizeMismatch,
-                    local_size: Some(l.size),
-                    remote_size: Some(r.size),
-                    local_md5: None,
-                    remote_md5: None,
-                },
+                (Some(l), None) => DiffEntry::new(path, DiffStatus::LocalOnly, Some(l.size), None),
+                (None, Some(r)) => DiffEntry::new(path, DiffStatus::RemoteOnly, None, Some(r.size)),
+                (Some(l), Some(r)) => {
+                    let status = if l.size == r.size { DiffStatus::Match } else { DiffStatus::SizeMismatch };
+                    DiffEntry::new(path, status, Some(l.size), Some(r.size))
+                }
                 (None, None) => unreachable!("path came from one of the two maps"),
             }
         })
