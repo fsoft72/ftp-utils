@@ -65,5 +65,5 @@
   - File(s): `crates/ftp-utils-core/src/diff.rs`, `crates/ftp-utils-core/src/connection.rs`
 - [x] **`DiffStatus::Scan` leaks into compare-only code** - `summarize` needs a dead `Scan => {}` arm and `format_entry` handles a status that `compare_entries` never produces. Model build output as its own type (or split the enum) so each mode only sees valid states.
   - File(s): `crates/ftp-utils-core/src/diff.rs`, `tools/ftpdiff/src/output.rs`
-- [ ] **No CI or lint/format configuration** - no `.github/` workflows, `rustfmt.toml` or clippy settings, and `io::Error::new(ErrorKind::Other, ..)` (replaceable with `io::Error::other`) is the kind of thing clippy would flag. Add a CI job running `cargo fmt --check`, `cargo clippy -- -D warnings` and `cargo test`.
+- [x] **No CI or lint/format configuration** - no `.github/` workflows, `rustfmt.toml` or clippy settings, and `io::Error::new(ErrorKind::Other, ..)` (replaceable with `io::Error::other`) is the kind of thing clippy would flag. Add a CI job running `cargo fmt --check`, `cargo clippy -- -D warnings` and `cargo test`. *Done: `rustfmt.toml` (`max_width = 120`, `use_small_heuristics = "Max"`; the workspace was reformatted in a separate commit), `.github/workflows/ci.yml`. The workflow has not been run on GitHub; its three commands pass locally.*
   - File(s): repository root
