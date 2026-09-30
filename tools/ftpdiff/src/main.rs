@@ -276,7 +276,7 @@ fn run_build(cli: &Cli, json_config: &config::JsonConfig) -> i32 {
             let mut out = Vec::new();
             for item in scanned {
                 let remote_md5 = if build.hash {
-                    let remote_path = format!("{remote_dir}/{}", item.relative_path);
+                    let remote_path = remote::join_remote(remote_dir, &item.relative_path);
                     match hash::remote_md5(&mut conn, &remote_path) {
                         Ok(md5) => Some(md5),
                         Err(err) => {

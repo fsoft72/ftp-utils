@@ -114,6 +114,17 @@ pub trait FtpConnection {
     }
 }
 
+/// Joins a remote directory and a relative path with exactly one `/`
+/// between them: `("/", "a")` and `("/x/", "a")` give `/a` and `/x/a`
+/// (a plain `format!("{root}/{rel}")` would give `//a` and `/x//a`). An
+/// empty `root` yields `relative` unchanged.
+pub fn join_remote(root: &str, relative: &str) -> String {
+    if root.is_empty() {
+        return relative.to_string();
+    }
+    format!("{}/{}", root.trim_end_matches('/'), relative.trim_start_matches('/'))
+}
+
 /// Recursively walks `root` on the remote server, returning one entry per
 /// file, skipping any file whose relative path matches one of `excludes`.
 /// Calls `progress` (if given) with a human-readable message for every
@@ -131,7 +142,7 @@ pub fn walk_remote<C: FtpConnection>(
         let full_path = if relative_dir.is_empty() {
             root.to_string()
         } else {
-            format!("{root}/{relative_dir}")
+            join_remote(root, &relative_dir)
         };
 
         for item in conn.list_dir(&full_path)? {
@@ -209,6 +220,27 @@ mod tests {
 
             Ok(())
         }
+    }
+
+    #[test]
+    fn join_remote_uses_exactly_one_separator() {
+        assert_eq!(join_remote("/remote", "a.txt"), "/remote/a.txt");
+        assert_eq!(join_remote("/remote/", "a.txt"), "/remote/a.txt");
+        assert_eq!(join_remote("/", "a.txt"), "/a.txt");
+        assert_eq!(join_remote("/remote", "sub/a.txt"), "/remote/sub/a.txt");
+        assert_eq!(join_remote("", "a.txt"), "a.txt");
+    }
+
+    #[test]
+    fn walks_nested_directories_under_root_with_trailing_slash() {
+        let mut listings = HashMap::new();
+        listings.insert("/".to_string(), vec![RawRemoteEntry { name: "sub".into(), is_dir: true, size: 0 }]);
+        listings.insert("/sub".to_string(), vec![RawRemoteEntry { name: "b.txt".into(), is_dir: false, size: 1 }]);
+        let mut conn = MockFtpConnection { listings, created_dirs: Vec::new() };
+
+        let entries = walk_remote(&mut conn, "/", &[], None).unwrap();
+
+        assert_eq!(entries, vec![RemoteEntry { relative_path: "sub/b.txt".to_string(), size: 1 }]);
     }
 
     #[test]

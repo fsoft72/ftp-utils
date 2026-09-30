@@ -111,3 +111,4 @@
 - Deduplicated the plain/FTPS connect paths in `SuppaFtpConnection::connect` (generic login helper).
 - Added `--timeout` (JSON `timeout`, default 30s): connect, control-channel and data-channel read/write timeouts; added `DEFAULT_FTP_PORT`/`DEFAULT_TIMEOUT_SECS` constants.
 - `ftpops copy --to local` downloads to a temporary `.<name>.ftpops-part` file and renames it on success; failures keep the previous file.
+- Added `remote::join_remote` (no more `//` for `--remote-dir /` or trailing slashes); local metadata errors name the file.

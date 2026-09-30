@@ -50,7 +50,7 @@
   - File(s): `crates/ftp-utils-core/src/ftp_client.rs`, `crates/ftp-utils-core/src/connection.rs`
 - [x] **Non-atomic local writes in `copy_to_local`** - a failed or interrupted download leaves a truncated file at the final path, which later looks like a size mismatch or, with `--skip-existing`, is skipped as "already exists". Write to a temporary file in the same directory and `rename` on success.
   - File(s): `tools/ftpops/src/ops.rs`
-- [ ] **Remote path joining produces `//` and loses error context** - `format!("{root}/{rel}")` yields `//a` for `--remote-dir /` and `/x//a` for a trailing slash; I/O errors in hashing (`fs::read`, `walkdir`) do not name the file. Add a `join_remote(root, rel)` helper and wrap errors with the path.
+- [x] **Remote path joining produces `//` and loses error context** - `format!("{root}/{rel}")` yields `//a` for `--remote-dir /` and `/x//a` for a trailing slash; I/O errors in hashing (`fs::read`, `walkdir`) do not name the file. Add a `join_remote(root, rel)` helper and wrap errors with the path.
   - File(s): `crates/ftp-utils-core/src/remote.rs`, `crates/ftp-utils-core/src/hash.rs`, `crates/ftp-utils-core/src/local.rs`, `tools/ftpops/src/ops.rs`
 
 ## Low / Nice to have

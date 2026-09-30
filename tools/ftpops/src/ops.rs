@@ -4,6 +4,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
+use ftp_utils_core::remote::join_remote;
 use ftp_utils_core::FtpConnection;
 
 use crate::csv_input::CsvRow;
@@ -41,7 +42,7 @@ pub fn copy_to_local<C: FtpConnection>(
                 return OpResult { relative_path: row.relative_path.clone(), outcome: OpOutcome::Skipped };
             }
 
-            let remote_path = format!("{remote_dir}/{}", row.relative_path);
+            let remote_path = join_remote(remote_dir, &row.relative_path);
             let outcome = (|| -> Result<(), String> {
                 if let Some(parent) = local_path.parent() {
                     std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
@@ -101,7 +102,7 @@ pub fn copy_to_remote<C: FtpConnection>(
     let mut results = Vec::with_capacity(rows.len());
 
     for row in rows {
-        let remote_path = format!("{remote_dir}/{}", row.relative_path);
+        let remote_path = join_remote(remote_dir, &row.relative_path);
         let local_path = local_dir.join(&row.relative_path);
 
         let outcome = (|| -> Result<OpOutcome, String> {
@@ -154,7 +155,7 @@ fn _remote_file_exists<C: FtpConnection>(
 pub fn delete_remote<C: FtpConnection>(conn: &mut C, remote_dir: &str, rows: &[&CsvRow]) -> Vec<OpResult> {
     rows.iter()
         .map(|row| {
-            let remote_path = format!("{remote_dir}/{}", row.relative_path);
+            let remote_path = join_remote(remote_dir, &row.relative_path);
             let outcome = conn.delete(&remote_path).map_err(|e| e.to_string());
             OpResult {
                 relative_path: row.relative_path.clone(),

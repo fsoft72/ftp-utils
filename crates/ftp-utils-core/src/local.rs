@@ -23,7 +23,7 @@ pub fn walk_local_dir(
     let mut entries = Vec::new();
 
     for result in walkdir::WalkDir::new(root) {
-        let dir_entry = result.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        let dir_entry = result.map_err(std::io::Error::other)?;
         if !dir_entry.file_type().is_file() {
             continue;
         }
@@ -41,7 +41,7 @@ pub fn walk_local_dir(
 
         let size = dir_entry
             .metadata()
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?
+            .map_err(|e| std::io::Error::other(format!("{relative}: {e}")))?
             .len();
 
         if let Some(cb) = progress.as_deref_mut() {

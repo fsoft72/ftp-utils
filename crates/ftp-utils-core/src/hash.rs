@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use crate::diff::{DiffEntry, DiffStatus};
-use crate::remote::{FtpConnection, FtpConnectionError};
+use crate::remote::{join_remote, FtpConnection, FtpConnectionError};
 
 /// Computes the MD5 of the local file at `path` as lowercase hex, reading
 /// it in chunks so memory use doesn't depend on the file size.
@@ -68,7 +68,7 @@ pub fn apply_hash_comparison<C: FtpConnection>(
         let remote_md5 = if let Some(md5) = remote_known_md5.get(&entry.relative_path) {
             Some(md5.clone())
         } else if let (Some(conn), Some(remote_root)) = (conn.as_deref_mut(), remote_root) {
-            let remote_path = format!("{remote_root}/{}", entry.relative_path);
+            let remote_path = join_remote(remote_root, &entry.relative_path);
             let hash = remote_md5(conn, &remote_path)
                 .map_err(|e| std::io::Error::other(format!("{}: {e}", entry.relative_path)))?;
             Some(hash)
