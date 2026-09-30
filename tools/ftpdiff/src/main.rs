@@ -6,7 +6,6 @@
 
 mod cli;
 mod config;
-mod csv_report;
 mod output;
 
 use std::collections::HashMap;
@@ -186,7 +185,7 @@ fn run() -> i32 {
         if effective.verbose {
             eprintln!("Writing CSV report to {}...", csv_path.display());
         }
-        if let Err(e) = csv_report::write_csv(csv_path, &entries) {
+        if let Err(e) = csv_source::write_report(csv_path, &entries) {
             eprintln!("Error: failed to write CSV to {}: {e}", csv_path.display());
             return 2;
         }
@@ -309,7 +308,7 @@ fn run_build(cli: &Cli, json_config: &config::JsonConfig) -> i32 {
     }
     println!("Scanned {} entries.", entries.len());
 
-    if let Err(e) = csv_report::write_csv(&build.csv, &entries) {
+    if let Err(e) = csv_source::write_report(&build.csv, &entries) {
         eprintln!("Error: failed to write CSV to {}: {e}", build.csv.display());
         return 2;
     }

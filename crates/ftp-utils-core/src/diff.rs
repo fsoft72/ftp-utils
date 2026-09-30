@@ -20,6 +20,48 @@ pub enum DiffStatus {
     Scan,
 }
 
+impl DiffStatus {
+    /// Every status, in declaration order.
+    pub const ALL: [DiffStatus; 6] = [
+        DiffStatus::LocalOnly,
+        DiffStatus::RemoteOnly,
+        DiffStatus::SizeMismatch,
+        DiffStatus::HashMismatch,
+        DiffStatus::Match,
+        DiffStatus::Scan,
+    ];
+
+    /// The name written to the CSV `status` column and accepted by
+    /// `FromStr`. Part of the CSV report format: don't rename casually.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            DiffStatus::LocalOnly => "LocalOnly",
+            DiffStatus::RemoteOnly => "RemoteOnly",
+            DiffStatus::SizeMismatch => "SizeMismatch",
+            DiffStatus::HashMismatch => "HashMismatch",
+            DiffStatus::Match => "Match",
+            DiffStatus::Scan => "Scan",
+        }
+    }
+}
+
+impl std::fmt::Display for DiffStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl std::str::FromStr for DiffStatus {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        DiffStatus::ALL
+            .into_iter()
+            .find(|status| status.as_str() == value)
+            .ok_or_else(|| format!("unknown status '{value}'"))
+    }
+}
+
 /// A single comparison result for one relative path.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DiffEntry {
@@ -47,6 +89,20 @@ impl DiffEntry {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn status_names_round_trip_and_match_debug_output() {
+        for status in DiffStatus::ALL {
+            assert_eq!(status.to_string().parse::<DiffStatus>(), Ok(status));
+            assert_eq!(status.to_string(), format!("{status:?}"));
+        }
+    }
+
+    #[test]
+    fn unknown_status_is_an_error() {
+        assert!("Bogus".parse::<DiffStatus>().is_err());
+        assert!("localonly".parse::<DiffStatus>().is_err());
+    }
 
     #[test]
     fn new_leaves_hashes_unset() {

@@ -6,7 +6,6 @@
 
 mod cli;
 mod confirm;
-mod csv_input;
 mod filter;
 mod ops;
 mod output;
@@ -16,6 +15,7 @@ use std::path::Path;
 
 use clap::Parser;
 use ftp_utils_core::connection::{self, ConnectionArgs, EffectiveConnection};
+use ftp_utils_core::csv_source::{self, StatusRow};
 use ftp_utils_core::ftp_client::SuppaFtpConnection;
 
 use cli::{Cli, Command};
@@ -80,8 +80,8 @@ fn connect(args: &ConnectionArgs, effective: &EffectiveConnection) -> Result<Sup
     })
 }
 
-fn read_filtered_rows(csv_path: &Path) -> Result<Vec<csv_input::CsvRow>, i32> {
-    csv_input::read_rows(csv_path).map_err(|e| {
+fn read_filtered_rows(csv_path: &Path) -> Result<Vec<StatusRow>, i32> {
+    csv_source::read_status_rows(csv_path).map_err(|e| {
         eprintln!("Error: {e}");
         2
     })
@@ -104,7 +104,7 @@ fn run_copy(
         Ok(r) => r,
         Err(code) => return code,
     };
-    let filtered = csv_input::filter_by_status(&rows, filter.status_str());
+    let filtered = filter::filter_by_status(&rows, filter.status());
 
     if dry_run {
         for row in &filtered {
@@ -160,7 +160,7 @@ fn run_delete(
         Ok(r) => r,
         Err(code) => return code,
     };
-    let filtered = csv_input::filter_by_status(&rows, filter.status_str());
+    let filtered = filter::filter_by_status(&rows, filter.status());
 
     if dry_run {
         for row in &filtered {

@@ -117,3 +117,4 @@
 - Introduced `RemoteParams` and `PartialConnection::require_remote`; `RemoteSource::Live`, `BuildSide::Remote` and `EffectiveConnection` now share them; added `SuppaFtpConnection::connect_params`.
 - Removed the unused `compare`/`CompareOptions`/`CompareError` pipeline from core (tools compose the tested building blocks; its 2 tests went with it).
 - Replaced six copy-pasted message error types with the `message_error!` macro (`ftp_utils_core::error`).
+- CSV report reading/writing now lives in core (`csv_source::read_status_rows`/`write_report`) with shared header lookup; `DiffStatus` has `Display`/`FromStr` and ftpops parses statuses into the enum (unknown statuses are errors).

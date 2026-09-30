@@ -1,16 +1,102 @@
-//! Reads a previously-written `ftpdiff --csv` report as a substitute for
-//! a live filesystem/FTP directory listing, for one side of a comparison
-//! (`--local-csv` / `--remote-csv`).
+//! Reading and writing `ftpdiff --csv` reports. Reading serves both as a
+//! substitute for a live directory listing on one side of a comparison
+//! (`--local-csv` / `--remote-csv`) and as ftpops' list of operations.
 
 use std::collections::HashMap;
 use std::path::Path;
 
+use crate::diff::{DiffEntry, DiffStatus};
 use crate::local::LocalEntry;
 use crate::remote::RemoteEntry;
 
 crate::message_error! {
     /// Error reading a CSV report used as a comparison source.
     pub CsvSourceError
+}
+
+/// CSV column names, in the order they are written.
+const COLUMNS: [&str; 6] = ["path", "status", "local_size", "remote_size", "local_md5", "remote_md5"];
+
+fn _column_index(headers: &csv::StringRecord, name: &str) -> Result<usize, CsvSourceError> {
+    headers
+        .iter()
+        .position(|h| h == name)
+        .ok_or_else(|| CsvSourceError(format!("CSV missing '{name}' column")))
+}
+
+/// Opens `path` as CSV and returns the reader with its header row.
+fn _open(path: &Path) -> Result<(csv::Reader<std::fs::File>, csv::StringRecord), CsvSourceError> {
+    let mut reader = csv::Reader::from_path(path)
+        .map_err(|e| CsvSourceError(format!("cannot read CSV {}: {e}", path.display())))?;
+    let headers = reader.headers().map_err(|e| CsvSourceError(e.to_string()))?.clone();
+    Ok((reader, headers))
+}
+
+/// Reads the `path` column of `record` and validates it as a safe
+/// relative path.
+fn _row_path(record: &csv::StringRecord, path_idx: usize) -> Result<String, CsvSourceError> {
+    let relative_path = record
+        .get(path_idx)
+        .ok_or_else(|| CsvSourceError("row missing 'path' value".to_string()))?
+        .to_string();
+    crate::paths::validate_relative_path(&relative_path)
+        .map_err(|e| CsvSourceError(format!("invalid CSV row: {e}")))?;
+    Ok(relative_path)
+}
+
+/// The path and status of one report row: all ftpops needs to decide what
+/// to operate on.
+#[derive(Debug, Clone, PartialEq)]
+pub struct StatusRow {
+    pub relative_path: String,
+    pub status: DiffStatus,
+}
+
+/// Reads every row's `path` and `status` from a report (other columns are
+/// ignored). Fails on an unsafe path or an unknown status.
+pub fn read_status_rows(path: &Path) -> Result<Vec<StatusRow>, CsvSourceError> {
+    let (mut reader, headers) = _open(path)?;
+    let path_idx = _column_index(&headers, "path")?;
+    let status_idx = _column_index(&headers, "status")?;
+
+    let mut rows = Vec::new();
+    for result in reader.records() {
+        let record = result.map_err(|e| CsvSourceError(format!("invalid CSV row: {e}")))?;
+        let relative_path = _row_path(&record, path_idx)?;
+        let status_text = record
+            .get(status_idx)
+            .ok_or_else(|| CsvSourceError("row missing 'status' value".to_string()))?;
+        let status = status_text
+            .parse::<DiffStatus>()
+            .map_err(|e| CsvSourceError(format!("row for '{relative_path}': {e}")))?;
+        rows.push(StatusRow { relative_path, status });
+    }
+
+    Ok(rows)
+}
+
+/// Writes `entries` to `path` as a CSV report with the columns
+/// `path,status,local_size,remote_size,local_md5,remote_md5`.
+pub fn write_report(path: &Path, entries: &[DiffEntry]) -> std::io::Result<()> {
+    let to_io = |e: csv::Error| std::io::Error::other(e);
+
+    let mut writer = csv::Writer::from_path(path).map_err(to_io)?;
+    writer.write_record(COLUMNS).map_err(to_io)?;
+
+    for entry in entries {
+        writer
+            .write_record([
+                entry.relative_path.clone(),
+                entry.status.to_string(),
+                entry.local_size.map(|v| v.to_string()).unwrap_or_default(),
+                entry.remote_size.map(|v| v.to_string()).unwrap_or_default(),
+                entry.local_md5.clone().unwrap_or_default(),
+                entry.remote_md5.clone().unwrap_or_default(),
+            ])
+            .map_err(to_io)?;
+    }
+
+    writer.flush()
 }
 
 struct RawRow {
@@ -20,33 +106,15 @@ struct RawRow {
 }
 
 fn read_side(path: &Path, size_column: &str, md5_column: &str) -> Result<Vec<RawRow>, CsvSourceError> {
-    let mut reader = csv::Reader::from_path(path)
-        .map_err(|e| CsvSourceError(format!("cannot read CSV {}: {e}", path.display())))?;
-
-    let headers = reader.headers().map_err(|e| CsvSourceError(e.to_string()))?.clone();
-    let path_idx = headers
-        .iter()
-        .position(|h| h == "path")
-        .ok_or_else(|| CsvSourceError("CSV missing 'path' column".to_string()))?;
-    let size_idx = headers
-        .iter()
-        .position(|h| h == size_column)
-        .ok_or_else(|| CsvSourceError(format!("CSV missing '{size_column}' column")))?;
-    let md5_idx = headers
-        .iter()
-        .position(|h| h == md5_column)
-        .ok_or_else(|| CsvSourceError(format!("CSV missing '{md5_column}' column")))?;
+    let (mut reader, headers) = _open(path)?;
+    let path_idx = _column_index(&headers, "path")?;
+    let size_idx = _column_index(&headers, size_column)?;
+    let md5_idx = _column_index(&headers, md5_column)?;
 
     let mut rows = Vec::new();
     for result in reader.records() {
         let record = result.map_err(|e| CsvSourceError(format!("invalid CSV row: {e}")))?;
-
-        let relative_path = record
-            .get(path_idx)
-            .ok_or_else(|| CsvSourceError("row missing 'path' value".to_string()))?
-            .to_string();
-        crate::paths::validate_relative_path(&relative_path)
-            .map_err(|e| CsvSourceError(format!("invalid CSV row: {e}")))?;
+        let relative_path = _row_path(&record, path_idx)?;
 
         let size_str = record.get(size_idx).unwrap_or("");
         let size = if size_str.is_empty() {
@@ -185,6 +253,57 @@ mod tests {
 
         assert!(read_local_entries(&path).is_err());
         assert!(read_remote_entries(&path).is_err());
+    }
+
+    #[test]
+    fn writes_header_and_rows() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("report.csv");
+        let entries = vec![DiffEntry::new("a.txt", DiffStatus::SizeMismatch, Some(10), Some(20))];
+
+        write_report(&path, &entries).unwrap();
+
+        let content = std::fs::read_to_string(&path).unwrap();
+        let mut lines = content.lines();
+        assert_eq!(lines.next().unwrap(), "path,status,local_size,remote_size,local_md5,remote_md5");
+        assert_eq!(lines.next().unwrap(), "a.txt,SizeMismatch,10,20,,");
+    }
+
+    #[test]
+    fn written_report_can_be_read_back() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("report.csv");
+        let mut entry = DiffEntry::new("sub/a.txt", DiffStatus::Match, Some(3), Some(3));
+        entry.local_md5 = Some("abc".to_string());
+        entry.remote_md5 = Some("abc".to_string());
+        let entries = vec![entry, DiffEntry::new("b.txt", DiffStatus::RemoteOnly, None, Some(9))];
+
+        write_report(&path, &entries).unwrap();
+
+        let rows = read_status_rows(&path).unwrap();
+        assert_eq!(
+            rows,
+            vec![
+                StatusRow { relative_path: "sub/a.txt".to_string(), status: DiffStatus::Match },
+                StatusRow { relative_path: "b.txt".to_string(), status: DiffStatus::RemoteOnly },
+            ]
+        );
+        let (local, known) = read_local_entries(&path).unwrap();
+        assert_eq!(local.len(), 1);
+        assert_eq!(known.get("sub/a.txt"), Some(&"abc".to_string()));
+    }
+
+    #[test]
+    fn status_rows_reject_unknown_status_and_unsafe_paths() {
+        let (_dir, bad_status) = write_csv("path,status\na.txt,Weird\n");
+        let err = read_status_rows(&bad_status).unwrap_err();
+        assert!(err.to_string().contains("Weird") && err.to_string().contains("a.txt"), "{err}");
+
+        let (_dir2, bad_path) = write_csv("path,status\n../x,LocalOnly\n");
+        assert!(read_status_rows(&bad_path).is_err());
+
+        let (_dir3, no_status_col) = write_csv("path,size\na.txt,1\n");
+        assert!(read_status_rows(&no_status_col).is_err());
     }
 
     #[test]
