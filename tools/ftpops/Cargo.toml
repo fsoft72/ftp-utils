@@ -8,7 +8,6 @@ description = "Perform bulk copy/delete operations based on an ftpdiff CSV repor
 [dependencies]
 ftp-utils-core = { path = "../../crates/ftp-utils-core" }
 clap.workspace = true
-csv.workspace = true
 colored.workspace = true
 
 [dev-dependencies]

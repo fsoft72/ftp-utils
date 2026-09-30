@@ -23,9 +23,9 @@
   - File(s): `crates/ftp-utils-core/src/remote.rs`, `tools/ftpops/src/ops.rs`
 - [x] **`copy_to_remote --skip-existing` lists the parent directory for every row** - the same directory is listed again for each file. Group rows by parent and list each directory once.
   - File(s): `tools/ftpops/src/ops.rs`
-- [ ] **Split `ftpdiff::run` / `run_build` god functions** - `run` (~170 lines) mixes config loading, live/CSV source loading, connecting, hashing, printing and CSV writing with a repeated `match ... { Err(e) => { eprintln!; return 2 } }` pattern. Extract `load_local_side`, `load_remote_side`, `report` and use a `Result<_, CliError>` with `?` and a single exit-code mapping in `main`.
+- [x] **Split `ftpdiff::run` / `run_build` god functions** - `run` (~170 lines) mixes config loading, live/CSV source loading, connecting, hashing, printing and CSV writing with a repeated `match ... { Err(e) => { eprintln!; return 2 } }` pattern. Extract `load_local_side`, `load_remote_side`, `report` and use a `Result<_, CliError>` with `?` and a single exit-code mapping in `main`.
   - File(s): `tools/ftpdiff/src/main.rs`
-- [ ] **Duplicated connect/password/hash logic between `run`, `run_build` and core** - the connect block appears twice in `main.rs`, and the "try_hash, else download and MD5" logic exists in both `hash.rs` and `run_build`. Add a single `connect_remote(...)` helper and a shared `hash::remote_md5(conn, path)` / `hash::local_md5(path)` in core.
+- [x] **Duplicated connect/password/hash logic between `run`, `run_build` and core** - the connect block appears twice in `main.rs`, and the "try_hash, else download and MD5" logic exists in both `hash.rs` and `run_build`. Add a single `connect_remote(...)` helper and a shared `hash::remote_md5(conn, path)` / `hash::local_md5(path)` in core.
   - File(s): `tools/ftpdiff/src/main.rs`, `crates/ftp-utils-core/src/hash.rs`
 - [x] **Unused public API in core duplicates the tool's pipeline** - `ftp_utils_core::compare`, `CompareOptions` and `CompareError` are not used by any tool (ftpdiff reimplements the flow in `main.rs`), so the tested path is not the shipped path. Either make `ftpdiff` call `compare` (extended to accept CSV sources) or delete it.
   - File(s): `crates/ftp-utils-core/src/lib.rs`, `tools/ftpdiff/src/main.rs`

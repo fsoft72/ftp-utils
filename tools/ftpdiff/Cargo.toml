@@ -10,7 +10,6 @@ ftp-utils-core = { path = "../../crates/ftp-utils-core" }
 clap.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-csv.workspace = true
 colored.workspace = true
 rpassword.workspace = true
 

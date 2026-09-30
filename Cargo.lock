@@ -267,7 +267,6 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "colored",
- "csv",
  "ftp-utils-core",
  "rpassword",
  "serde",
@@ -281,7 +280,6 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "colored",
- "csv",
  "ftp-utils-core",
  "tempfile",
 ]

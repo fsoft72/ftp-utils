@@ -13,6 +13,7 @@ pub mod csv_source;
 pub mod diff;
 pub mod error;
 pub mod exclude;
+pub mod exit;
 pub mod ftp_client;
 pub mod hash;
 pub mod local;
