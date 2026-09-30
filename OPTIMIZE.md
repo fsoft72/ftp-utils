@@ -8,7 +8,7 @@
   - File(s): `tools/ftpops/src/csv_input.rs`, `tools/ftpops/src/ops.rs`, `crates/ftp-utils-core/src/csv_source.rs`
 - [x] **Do not silently drop unparseable FTP listing lines** - `list_dir` does `let Ok(..) = parse_posix(..) else { continue }`, so any line the parser rejects (unusual server format, symlink, odd filename) vanishes from the remote tree. The diff then reports false `LocalOnly` entries, which `ftpops copy --to remote --filter local-only` will happily re-upload or `delete --on local` will remove. Return an error (or at least a warning counted in the summary) for lines that cannot be parsed, and consider `MLSD` when the server supports it.
   - File(s): `crates/ftp-utils-core/src/ftp_client.rs`
-- [ ] **`--skip-existing` overwrites on listing errors** - in `copy_to_remote`, `list_dir(..).unwrap_or(false)` treats a failed listing as "file does not exist", so a transient error defeats the very flag meant to prevent overwrites. Propagate the error as `OpOutcome::Failed` instead of swallowing it.
+- [x] **`--skip-existing` overwrites on listing errors** - in `copy_to_remote`, `list_dir(..).unwrap_or(false)` treats a failed listing as "file does not exist", so a transient error defeats the very flag meant to prevent overwrites. Propagate the error as `OpOutcome::Failed` instead of swallowing it.
   - File(s): `tools/ftpops/src/ops.rs`
 
 ## High
