@@ -46,9 +46,7 @@ pub fn copy_to_local<C: FtpConnection>(
                 if let Some(parent) = local_path.parent() {
                     std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
                 }
-                let mut file = std::fs::File::create(&local_path).map_err(|e| e.to_string())?;
-                conn.retr_to_writer(&remote_path, &mut file).map_err(|e| e.to_string())?;
-                Ok(())
+                _download_atomically(conn, &remote_path, &local_path)
             })();
 
             OpResult {
@@ -60,6 +58,30 @@ pub fn copy_to_local<C: FtpConnection>(
             }
         })
         .collect()
+}
+
+/// Downloads `remote_path` to a temporary file next to `local_path` and
+/// renames it into place only once the transfer succeeded, so a failed or
+/// interrupted download never leaves a truncated file at (or replaces the
+/// previous content of) `local_path`.
+fn _download_atomically<C: FtpConnection>(conn: &mut C, remote_path: &str, local_path: &Path) -> Result<(), String> {
+    let file_name = local_path.file_name().ok_or_else(|| format!("invalid local path {}", local_path.display()))?;
+    let mut temp_name = std::ffi::OsString::from(".");
+    temp_name.push(file_name);
+    temp_name.push(".ftpops-part");
+    let temp_path = local_path.with_file_name(temp_name);
+
+    let result = (|| -> Result<(), String> {
+        let mut file = std::fs::File::create(&temp_path).map_err(|e| e.to_string())?;
+        conn.retr_to_writer(remote_path, &mut file).map_err(|e| e.to_string())?;
+        file.sync_all().map_err(|e| e.to_string())?;
+        std::fs::rename(&temp_path, local_path).map_err(|e| e.to_string())
+    })();
+
+    if result.is_err() {
+        let _ = std::fs::remove_file(&temp_path);
+    }
+    result
 }
 
 /// Uploads each row's local file to the remote directory, creating
@@ -254,6 +276,39 @@ mod tests {
         assert_eq!(results, vec![OpResult { relative_path: "file.txt".to_string(), outcome: OpOutcome::Skipped }]);
         let content = std::fs::read(dir.path().join("file.txt")).unwrap();
         assert_eq!(content, b"already here");
+    }
+
+    #[test]
+    fn copy_to_local_failure_keeps_existing_file_and_leaves_no_temp_file() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("file.txt"), b"previous content").unwrap();
+        let mut conn = MockConnection::default(); // remote file is missing: download fails
+
+        let rows = vec![row("file.txt")];
+        let refs: Vec<&CsvRow> = rows.iter().collect();
+
+        let results = copy_to_local(&mut conn, "/remote", dir.path(), &refs, false);
+
+        assert!(matches!(results[0].outcome, OpOutcome::Failed(_)));
+        assert_eq!(std::fs::read(dir.path().join("file.txt")).unwrap(), b"previous content");
+        let leftovers: Vec<_> = std::fs::read_dir(dir.path()).unwrap().collect();
+        assert_eq!(leftovers.len(), 1, "unexpected files: {leftovers:?}");
+    }
+
+    #[test]
+    fn copy_to_local_overwrites_existing_file_on_success() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("file.txt"), b"old").unwrap();
+        let mut conn = MockConnection::default();
+        conn.remote_files.insert("/remote/file.txt".to_string(), b"new".to_vec());
+
+        let rows = vec![row("file.txt")];
+        let refs: Vec<&CsvRow> = rows.iter().collect();
+
+        copy_to_local(&mut conn, "/remote", dir.path(), &refs, false);
+
+        assert_eq!(std::fs::read(dir.path().join("file.txt")).unwrap(), b"new");
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
     }
 
     #[test]
