@@ -178,40 +178,39 @@ fn write_csv(path: &Path, entries: &[ReportEntry], verbose: bool) -> Result<(), 
         .map_err(|e| CliError(format!("failed to write CSV to {}: {e}", path.display())))
 }
 
-/// Downloads every entry of `entries` (binary mode, streamed) from
-/// `remote_root` into `dest`, recreating subdirectories. A file already in
-/// `dest` with the same size is skipped. Each file is written to a
-/// temporary `.<name>.ftpdiff-part` file and renamed on success, so a
-/// failed transfer never leaves a truncated file under its final name.
-/// Returns `(downloaded, skipped)` counts.
-fn download_remote_files<C: FtpConnection>(
-    conn: &mut C,
-    remote_root: &str,
-    entries: &[RemoteEntry],
-    dest: &Path,
-    progress: &mut Progress,
-) -> Result<(usize, usize), CliError> {
-    let (mut downloaded, mut skipped) = (0, 0);
+/// Downloads remote files (binary mode, streamed) into one directory as the
+/// remote walk lists them, recreating subdirectories. A file already there
+/// with the same size is skipped. Each file is written to a temporary
+/// `.<name>.ftpdiff-part` file and renamed on success, so a failed transfer
+/// never leaves a truncated file under its final name.
+struct Downloader<'a> {
+    dest: &'a Path,
+    remote_root: &'a str,
+    verbose: bool,
+    downloaded: usize,
+    skipped: usize,
+}
 
-    for entry in entries {
+impl Downloader<'_> {
+    /// Fetches one listed file, or skips it if it is already up to date.
+    fn fetch<C: FtpConnection>(&mut self, conn: &mut C, entry: &RemoteEntry) -> Result<(), CliError> {
         validate_relative_path(&entry.relative_path)
             .map_err(|e| CliError(format!("refusing to download {}: {e}", entry.relative_path)))?;
 
-        let target = dest.join(&entry.relative_path);
+        let target = self.dest.join(&entry.relative_path);
         if fs::metadata(&target).is_ok_and(|m| m.is_file() && m.len() == entry.size) {
-            skipped += 1;
-            continue;
+            self.skipped += 1;
+            return Ok(());
         }
 
-        if let Some(report) = progress.as_deref_mut() {
-            report(&format!("download {}", entry.relative_path));
+        if self.verbose {
+            eprintln!("Downloading {}", entry.relative_path);
         }
-        download_one(conn, &remote::join_remote(remote_root, &entry.relative_path), &target)
+        download_one(conn, &remote::join_remote(self.remote_root, &entry.relative_path), &target)
             .map_err(|e| CliError(format!("failed to download {}: {e}", entry.relative_path)))?;
-        downloaded += 1;
+        self.downloaded += 1;
+        Ok(())
     }
-
-    Ok((downloaded, skipped))
 }
 
 /// Streams `remote_path` to `target` through a temporary part file.
@@ -235,17 +234,32 @@ fn download_one<C: FtpConnection>(conn: &mut C, remote_path: &str, target: &Path
     }
 }
 
-/// Runs the download and prints its summary line.
-fn download_and_report<C: FtpConnection>(
+/// Walks the remote tree; when `download_dir` is set, each file is
+/// downloaded right when the walk lists it, and a summary line is printed.
+fn walk_and_download<C: FtpConnection>(
     conn: &mut C,
     remote_root: &str,
-    entries: &[RemoteEntry],
-    dest: &Path,
+    exclude: &ExcludeSet,
+    download_dir: Option<&Path>,
+    verbose: bool,
     progress: &mut Progress,
-) -> Result<(), CliError> {
-    let (downloaded, skipped) = download_remote_files(conn, remote_root, entries, dest, progress)?;
-    println!("Downloaded {downloaded} files to {} ({skipped} skipped, same size).", dest.display());
-    Ok(())
+) -> Result<Vec<RemoteEntry>, CliError> {
+    let Some(dest) = download_dir else {
+        return Ok(remote::walk_remote(conn, remote_root, exclude, progress.as_deref_mut())?);
+    };
+
+    let mut downloader = Downloader { dest, remote_root, verbose, downloaded: 0, skipped: 0 };
+    let entries = remote::walk_remote_with(conn, remote_root, exclude, progress.as_deref_mut(), |conn, entry| {
+        downloader.fetch(conn, entry)
+    })?;
+
+    println!(
+        "Downloaded {} files to {} ({} skipped, same size).",
+        downloader.downloaded,
+        dest.display(),
+        downloader.skipped
+    );
+    Ok(entries)
 }
 
 /// The compare mode: load both sides, diff, optionally hash, report.
@@ -260,8 +274,14 @@ fn run_compare(cli: &Cli, json_config: &JsonConfig) -> Result<i32, CliError> {
     let (remote_entries, remote_known_md5) = match &effective.remote {
         RemoteSource::Live(params) => {
             let mut conn = connect_remote(params, cli.connection.password.as_deref(), effective.verbose)?;
-            let entries =
-                remote::walk_remote(&mut conn, &params.remote_dir, &effective.exclude, progress.as_deref_mut())?;
+            let entries = walk_and_download(
+                &mut conn,
+                &params.remote_dir,
+                &effective.exclude,
+                effective.download_dir.as_deref(),
+                effective.verbose,
+                &mut progress,
+            )?;
             connection = Some(conn);
             (entries, HashMap::new())
         }
@@ -278,12 +298,6 @@ fn run_compare(cli: &Cli, json_config: &JsonConfig) -> Result<i32, CliError> {
             &mut entries,
             &mut progress,
         )?;
-    }
-
-    if let (Some(dest), Some(conn), RemoteSource::Live(params)) =
-        (&effective.download_dir, connection.as_mut(), &effective.remote)
-    {
-        download_and_report(conn, &params.remote_dir, &remote_entries, dest, &mut progress)?;
     }
 
     if let Some(conn) = connection {
@@ -350,16 +364,19 @@ fn scan_local(
 }
 
 /// Scans a remote directory into `Scan` entries, hashing each file when
-/// `hash` is set.
+/// `hash` is set and downloading each file into `download_dir` (if given)
+/// during the scan.
 fn scan_remote<C: FtpConnection>(
     conn: &mut C,
     remote_dir: &str,
     exclude: &ExcludeSet,
     hash: bool,
+    download_dir: Option<&Path>,
+    verbose: bool,
     progress: &mut Progress,
 ) -> Result<Vec<ReportEntry>, CliError> {
     let mut entries = Vec::new();
-    for item in remote::walk_remote(conn, remote_dir, exclude, progress.as_deref_mut())? {
+    for item in walk_and_download(conn, remote_dir, exclude, download_dir, verbose, progress)? {
         let mut entry = ReportEntry::scan(item.relative_path, None, Some(item.size));
         if hash {
             let remote_path = remote::join_remote(remote_dir, &entry.relative_path);
@@ -381,14 +398,15 @@ fn run_build(cli: &Cli, json_config: &JsonConfig) -> Result<i32, CliError> {
         BuildSide::Local(dir) => scan_local(dir, &build.exclude, build.hash, &mut progress)?,
         BuildSide::Remote(params) => {
             let mut conn = connect_remote(params, cli.connection.password.as_deref(), build.verbose)?;
-            let entries = scan_remote(&mut conn, &params.remote_dir, &build.exclude, build.hash, &mut progress)?;
-            if let Some(dest) = &build.download_dir {
-                let files: Vec<RemoteEntry> = entries
-                    .iter()
-                    .filter_map(|e| Some(RemoteEntry { relative_path: e.relative_path.clone(), size: e.remote_size? }))
-                    .collect();
-                download_and_report(&mut conn, &params.remote_dir, &files, dest, &mut progress)?;
-            }
+            let entries = scan_remote(
+                &mut conn,
+                &params.remote_dir,
+                &build.exclude,
+                build.hash,
+                build.download_dir.as_deref(),
+                build.verbose,
+                &mut progress,
+            )?;
             conn.close();
             entries
         }
@@ -450,10 +468,10 @@ mod tests {
     fn scan_remote_lists_files_and_hashes_via_download() {
         let mut conn = server();
 
-        let plain = scan_remote(&mut conn, "/remote", &excludes(&["*.tmp"]), false, &mut None).unwrap();
+        let plain = scan_remote(&mut conn, "/remote", &excludes(&["*.tmp"]), false, None, false, &mut None).unwrap();
         assert_eq!(plain, vec![ReportEntry::scan("a.txt", None, Some(5))]);
 
-        let hashed = scan_remote(&mut conn, "/remote", &excludes(&["*.tmp"]), true, &mut None).unwrap();
+        let hashed = scan_remote(&mut conn, "/remote", &excludes(&["*.tmp"]), true, None, false, &mut None).unwrap();
         assert_eq!(hashed[0].remote_md5.as_deref(), Some(HELLO_MD5));
     }
 
@@ -462,7 +480,7 @@ mod tests {
         let mut conn = server();
         conn.files.clear();
 
-        let err = scan_remote(&mut conn, "/remote", &excludes(&["*.tmp"]), true, &mut None).unwrap_err();
+        let err = scan_remote(&mut conn, "/remote", &excludes(&["*.tmp"]), true, None, false, &mut None).unwrap_err();
 
         assert!(err.to_string().contains("a.txt"), "{err}");
     }
@@ -512,47 +530,59 @@ mod tests {
         assert_eq!(entries[0].status, DiffStatus::HashMismatch);
     }
 
-    fn remote_entries() -> Vec<RemoteEntry> {
-        vec![
-            RemoteEntry { relative_path: "a.txt".into(), size: 5 },
-            RemoteEntry { relative_path: "sub/b.txt".into(), size: 5 },
-        ]
+    /// Walks `/remote` on `conn`, downloading into `dest`.
+    fn download_walk(conn: &mut MockFtpConnection, dest: &Path) -> Result<Vec<RemoteEntry>, CliError> {
+        walk_and_download(conn, "/remote", &excludes(&["*.tmp"]), Some(dest), false, &mut None)
     }
 
     #[test]
-    fn download_writes_files_and_creates_subdirectories() {
+    fn download_happens_during_the_walk_and_honours_excludes() {
         let dest = tempfile::tempdir().unwrap();
         let mut conn = MockFtpConnection { default_content: Some(b"hello".to_vec()), ..server() };
 
-        let counts = download_remote_files(&mut conn, "/remote", &remote_entries(), dest.path(), &mut None).unwrap();
+        let entries = download_walk(&mut conn, dest.path()).unwrap();
 
-        assert_eq!(counts, (2, 0));
+        assert_eq!(entries, vec![RemoteEntry { relative_path: "a.txt".into(), size: 5 }]);
         assert_eq!(std::fs::read(dest.path().join("a.txt")).unwrap(), b"hello");
-        assert_eq!(std::fs::read(dest.path().join("sub/b.txt")).unwrap(), b"hello");
+        assert!(!dest.path().join("skip.tmp").exists());
         assert!(!dest.path().join(".a.txt.ftpdiff-part").exists());
     }
 
     #[test]
-    fn download_skips_files_with_same_size_and_replaces_others() {
+    fn download_creates_subdirectories() {
+        let dest = tempfile::tempdir().unwrap();
+        let mut conn = server();
+        conn.listings.get_mut("/remote").unwrap().push(RawRemoteEntry { name: "sub".into(), is_dir: true, size: 0 });
+        conn.listings
+            .insert("/remote/sub".into(), vec![RawRemoteEntry { name: "b.txt".into(), is_dir: false, size: 5 }]);
+        conn.files.insert("/remote/sub/b.txt".into(), b"hello".to_vec());
+
+        download_walk(&mut conn, dest.path()).unwrap();
+
+        assert_eq!(std::fs::read(dest.path().join("sub/b.txt")).unwrap(), b"hello");
+    }
+
+    #[test]
+    fn download_skips_same_size_and_replaces_different_size() {
         let dest = tempfile::tempdir().unwrap();
         std::fs::write(dest.path().join("a.txt"), b"HELLO").unwrap(); // same size: kept
-        std::fs::create_dir(dest.path().join("sub")).unwrap();
-        std::fs::write(dest.path().join("sub/b.txt"), b"old").unwrap(); // different size: replaced
-        let mut conn = MockFtpConnection { default_content: Some(b"hello".to_vec()), ..server() };
 
-        let counts = download_remote_files(&mut conn, "/remote", &remote_entries(), dest.path(), &mut None).unwrap();
-
-        assert_eq!(counts, (1, 1));
+        download_walk(&mut server(), dest.path()).unwrap();
         assert_eq!(std::fs::read(dest.path().join("a.txt")).unwrap(), b"HELLO");
-        assert_eq!(std::fs::read(dest.path().join("sub/b.txt")).unwrap(), b"hello");
+
+        std::fs::write(dest.path().join("a.txt"), b"old").unwrap(); // different size: replaced
+        download_walk(&mut server(), dest.path()).unwrap();
+        assert_eq!(std::fs::read(dest.path().join("a.txt")).unwrap(), b"hello");
     }
 
     #[test]
     fn download_refuses_paths_escaping_the_destination() {
         let dest = tempfile::tempdir().unwrap();
-        let entries = vec![RemoteEntry { relative_path: "../evil.txt".into(), size: 1 }];
+        let mut downloader =
+            Downloader { dest: dest.path(), remote_root: "/remote", verbose: false, downloaded: 0, skipped: 0 };
+        let entry = RemoteEntry { relative_path: "../evil.txt".into(), size: 1 };
 
-        let err = download_remote_files(&mut server(), "/remote", &entries, dest.path(), &mut None).unwrap_err();
+        let err = downloader.fetch(&mut server(), &entry).unwrap_err();
 
         assert!(err.to_string().contains("evil.txt"), "{err}");
     }
@@ -563,7 +593,7 @@ mod tests {
         let mut conn = server();
         conn.files.clear();
 
-        let err = download_remote_files(&mut conn, "/remote", &remote_entries(), dest.path(), &mut None).unwrap_err();
+        let err = download_walk(&mut conn, dest.path()).unwrap_err();
 
         assert!(err.to_string().contains("a.txt"), "{err}");
         assert!(!dest.path().join("a.txt").exists());

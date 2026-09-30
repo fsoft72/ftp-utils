@@ -126,8 +126,26 @@ pub fn walk_remote<C: FtpConnection>(
     conn: &mut C,
     root: &str,
     excludes: &ExcludeSet,
-    mut progress: Option<&mut (dyn FnMut(&str) + '_)>,
+    progress: Option<&mut (dyn FnMut(&str) + '_)>,
 ) -> Result<Vec<RemoteEntry>, FtpConnectionError> {
+    walk_remote_with(conn, root, excludes, progress, |_, _| Ok::<(), FtpConnectionError>(()))
+}
+
+/// Like `walk_remote`, but also calls `on_file` with the connection and
+/// every included file as soon as it is listed (before the walk moves on),
+/// so callers can act on files during the scan, e.g. download them. The
+/// first error returned by `on_file` (or by a listing) stops the walk.
+pub fn walk_remote_with<C, E>(
+    conn: &mut C,
+    root: &str,
+    excludes: &ExcludeSet,
+    mut progress: Option<&mut (dyn FnMut(&str) + '_)>,
+    mut on_file: impl FnMut(&mut C, &RemoteEntry) -> Result<(), E>,
+) -> Result<Vec<RemoteEntry>, E>
+where
+    C: FtpConnection,
+    E: From<FtpConnectionError>,
+{
     let mut entries = Vec::new();
     let mut dirs_to_visit: Vec<String> = vec![String::new()]; // "" means root itself
 
@@ -153,7 +171,9 @@ pub fn walk_remote<C: FtpConnection>(
                 cb(&format!("remote: {relative_path}"));
             }
 
-            entries.push(RemoteEntry { relative_path, size: item.size });
+            let entry = RemoteEntry { relative_path, size: item.size };
+            on_file(conn, &entry)?;
+            entries.push(entry);
         }
     }
 
@@ -191,6 +211,37 @@ mod tests {
         let entries = walk_remote(&mut conn, "/", &ExcludeSet::default(), None).unwrap();
 
         assert_eq!(entries, vec![RemoteEntry { relative_path: "sub/b.txt".to_string(), size: 1 }]);
+    }
+
+    #[test]
+    fn walk_with_calls_the_callback_for_each_included_file_and_stops_on_error() {
+        let mut listings = HashMap::new();
+        listings.insert(
+            "/remote".to_string(),
+            vec![
+                RawRemoteEntry { name: "a.txt".into(), is_dir: false, size: 1 },
+                RawRemoteEntry { name: "skip.tmp".into(), is_dir: false, size: 1 },
+                RawRemoteEntry { name: "b.txt".into(), is_dir: false, size: 2 },
+            ],
+        );
+        let mut conn = mock(listings);
+        let excludes = ExcludeSet::new(&["*.tmp".to_string()]).unwrap();
+
+        let mut seen = Vec::new();
+        walk_remote_with(&mut conn, "/remote", &excludes, None, |_, e| {
+            seen.push(e.relative_path.clone());
+            Ok::<(), FtpConnectionError>(())
+        })
+        .unwrap();
+        assert_eq!(seen, vec!["a.txt".to_string(), "b.txt".to_string()]);
+
+        let mut calls = 0;
+        let result = walk_remote_with(&mut conn, "/remote", &excludes, None, |_, _| {
+            calls += 1;
+            Err(FtpConnectionError("boom".to_string()))
+        });
+        assert!(result.is_err());
+        assert_eq!(calls, 1);
     }
 
     #[test]
