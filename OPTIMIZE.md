@@ -59,7 +59,7 @@
   - File(s): `crates/ftp-utils-core/src/remote.rs`, `crates/ftp-utils-core/src/hash.rs`, `crates/ftp-utils-core/src/lib.rs`, `tools/ftpops/src/ops.rs`
 - [ ] **Untested orchestration and FTP client** - `ftp_client.rs`, `ftpdiff/main.rs` and `ftpops/main.rs` have no tests, so exit-code behavior and the CSV/live wiring are only covered manually. Once `run` is split, add integration tests (e.g. against an in-process FTP server such as `libunftp`) and CLI tests with `assert_cmd`.
   - File(s): `crates/ftp-utils-core/src/ftp_client.rs`, `tools/ftpdiff/src/main.rs`, `tools/ftpops/src/main.rs`
-- [ ] **Duplicated `run_copy` / `run_delete` skeleton and magic exit codes** - both load config, read/filter rows, handle dry-run, print results and map failures to `0/1`, and the numbers `0/1/2` are scattered literals across both binaries. Define `const EXIT_OK/EXIT_DIFF/EXIT_ERROR` (shared in core) and factor the shared flow.
+- [x] **Duplicated `run_copy` / `run_delete` skeleton and magic exit codes** - both load config, read/filter rows, handle dry-run, print results and map failures to `0/1`, and the numbers `0/1/2` are scattered literals across both binaries. Define `const EXIT_OK/EXIT_DIFF/EXIT_ERROR` (shared in core) and factor the shared flow.
   - File(s): `tools/ftpops/src/main.rs`, `tools/ftpdiff/src/main.rs`
 - [x] **Stale module doc and default port literal** - `diff.rs` still says comparison "will be implemented according to the implementation plan", and the default port `21` is a bare literal in `merge_connection_partial`. Update the doc and add `const DEFAULT_FTP_PORT: u16 = 21;`.
   - File(s): `crates/ftp-utils-core/src/diff.rs`, `crates/ftp-utils-core/src/connection.rs`

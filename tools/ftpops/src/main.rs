@@ -4,6 +4,7 @@
 //! See `docs/superpowers/specs/2026-09-21-ftpops-design.md` for the
 //! design this binary implements.
 
+mod app;
 mod cli;
 mod confirm;
 mod filter;
@@ -11,210 +12,19 @@ mod ops;
 mod output;
 mod validate;
 
-use std::path::Path;
-
 use clap::Parser;
-use ftp_utils_core::connection::{self, ConnectionArgs, EffectiveConnection};
-use ftp_utils_core::csv_source::{self, StatusRow};
-use ftp_utils_core::ftp_client::SuppaFtpConnection;
+use ftp_utils_core::exit::EXIT_ERROR;
 
-use cli::{Cli, Command};
-use filter::Filter;
-use validate::{CopyTarget, DeleteTarget};
+use cli::Cli;
 
 fn main() {
-    std::process::exit(run());
-}
-
-fn run() -> i32 {
-    let cli = Cli::parse();
-
-    match cli.command {
-        Command::Copy { connection, to, filter, csv, skip_existing, dry_run } => {
-            if let Err(e) = validate::validate_copy(to, filter) {
-                eprintln!("Error: {e}");
-                return 2;
-            }
-            run_copy(&connection, to, filter, &csv, skip_existing, dry_run)
-        }
-        Command::Delete { connection, on, filter, csv, dry_run, yes } => {
-            if let Err(e) = validate::validate_delete(on, filter) {
-                eprintln!("Error: {e}");
-                return 2;
-            }
-            run_delete(&connection, on, filter, &csv, dry_run, yes)
-        }
-    }
-}
-
-fn load_effective_connection(args: &ConnectionArgs) -> Result<EffectiveConnection, i32> {
-    let json_config = match &args.config {
-        Some(path) => match connection::load_json_config::<connection::ConnectionJsonConfig>(path) {
-            Ok(c) => c,
-            Err(e) => {
-                eprintln!("Error: {e}");
-                return Err(2);
-            }
-        },
-        None => connection::ConnectionJsonConfig::default(),
-    };
-
-    connection::merge_connection(args, &json_config).map_err(|e| {
-        eprintln!("Error: {e}");
-        2
-    })
-}
-
-fn connect(args: &ConnectionArgs, effective: &EffectiveConnection) -> Result<SuppaFtpConnection, i32> {
-    let password = match connection::read_password(args.password.as_deref(), "FTPOPS_PASSWORD") {
-        Ok(p) => p,
+    let code = match app::run(Cli::parse()) {
+        Ok(code) => code,
         Err(e) => {
             eprintln!("Error: {e}");
-            return Err(2);
+            EXIT_ERROR
         }
     };
 
-    SuppaFtpConnection::connect_params(&effective.remote, &password).map_err(|e| {
-        eprintln!("Error: failed to connect to {}:{}: {e}", effective.remote.host, effective.remote.port);
-        2
-    })
-}
-
-fn read_filtered_rows(csv_path: &Path) -> Result<Vec<StatusRow>, i32> {
-    csv_source::read_status_rows(csv_path).map_err(|e| {
-        eprintln!("Error: {e}");
-        2
-    })
-}
-
-fn run_copy(
-    connection_args: &ConnectionArgs,
-    to: CopyTarget,
-    filter: Filter,
-    csv_path: &Path,
-    skip_existing: bool,
-    dry_run: bool,
-) -> i32 {
-    let effective = match load_effective_connection(connection_args) {
-        Ok(c) => c,
-        Err(code) => return code,
-    };
-
-    let rows = match read_filtered_rows(csv_path) {
-        Ok(r) => r,
-        Err(code) => return code,
-    };
-    let filtered = filter::filter_by_status(&rows, filter.status());
-
-    if dry_run {
-        for row in &filtered {
-            println!("{}", output::format_dry_run_line("copy", &row.relative_path));
-        }
-        println!("Would copy {} file(s).", filtered.len());
-        return 0;
-    }
-
-    let mut connection = match connect(connection_args, &effective) {
-        Ok(c) => c,
-        Err(code) => return code,
-    };
-
-    let results = match to {
-        CopyTarget::Local => {
-            ops::copy_to_local(&mut connection, &effective.remote.remote_dir, &effective.local_dir, &filtered, skip_existing)
-        }
-        CopyTarget::Remote => {
-            ops::copy_to_remote(&mut connection, &effective.remote.remote_dir, &effective.local_dir, &filtered, skip_existing)
-        }
-    };
-
-    connection.close();
-
-    for result in &results {
-        println!("{}", output::format_result(result));
-    }
-    let summary = output::summarize(&results);
-    println!("{}", output::format_summary(&summary));
-
-    if summary.failed > 0 {
-        1
-    } else {
-        0
-    }
-}
-
-fn run_delete(
-    connection_args: &ConnectionArgs,
-    on: DeleteTarget,
-    filter: Filter,
-    csv_path: &Path,
-    dry_run: bool,
-    yes: bool,
-) -> i32 {
-    let effective = match load_effective_connection(connection_args) {
-        Ok(c) => c,
-        Err(code) => return code,
-    };
-
-    let rows = match read_filtered_rows(csv_path) {
-        Ok(r) => r,
-        Err(code) => return code,
-    };
-    let filtered = filter::filter_by_status(&rows, filter.status());
-
-    if dry_run {
-        for row in &filtered {
-            println!("{}", output::format_dry_run_line("delete", &row.relative_path));
-        }
-        println!("Would delete {} file(s).", filtered.len());
-        return 0;
-    }
-
-    if !yes && !filtered.is_empty() {
-        let (side, dir) = match on {
-            DeleteTarget::Local => ("local", effective.local_dir.display().to_string()),
-            DeleteTarget::Remote => ("remote", effective.remote.remote_dir.clone()),
-        };
-        let prompt = format!(
-            "About to delete {} file(s) on the {side} side under {dir}, based on {}. Continue?",
-            filtered.len(),
-            csv_path.display()
-        );
-        match confirm::confirm(&prompt) {
-            Ok(true) => {}
-            Ok(false) => {
-                eprintln!("Aborted: nothing was deleted (use --yes to skip this prompt).");
-                return 2;
-            }
-            Err(e) => {
-                eprintln!("Error: failed to read confirmation: {e}");
-                return 2;
-            }
-        }
-    }
-
-    let results = match on {
-        DeleteTarget::Local => ops::delete_local(&effective.local_dir, &filtered),
-        DeleteTarget::Remote => {
-            let mut connection = match connect(connection_args, &effective) {
-                Ok(c) => c,
-                Err(code) => return code,
-            };
-            let results = ops::delete_remote(&mut connection, &effective.remote.remote_dir, &filtered);
-            connection.close();
-            results
-        }
-    };
-
-    for result in &results {
-        println!("{}", output::format_result(result));
-    }
-    let summary = output::summarize(&results);
-    println!("{}", output::format_summary(&summary));
-
-    if summary.failed > 0 {
-        1
-    } else {
-        0
-    }
+    std::process::exit(code);
 }
