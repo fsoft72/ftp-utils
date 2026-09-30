@@ -22,6 +22,7 @@ pub struct JsonConfig {
     pub verbose: Option<bool>,
     #[serde(default)]
     pub exclude: Vec<String>,
+    pub download_dir: Option<PathBuf>,
 }
 
 /// Where the local side of the comparison comes from.
@@ -46,6 +47,7 @@ pub struct EffectiveConfig {
     pub verbose: bool,
     pub exclude: ExcludeSet,
     pub csv: Option<PathBuf>,
+    pub download_dir: Option<PathBuf>,
 }
 
 pub fn load_json_config(path: &Path) -> Result<JsonConfig, ConfigError> {
@@ -67,6 +69,7 @@ pub struct BuildConfig {
     pub exclude: ExcludeSet,
     pub csv: PathBuf,
     pub verbose: bool,
+    pub download_dir: Option<PathBuf>,
 }
 
 /// Resolves a `--build` run's settings. Requires `--csv`; rejects
@@ -98,6 +101,11 @@ pub fn merge_build(cli: &Cli, json: &JsonConfig) -> Result<BuildConfig, ConfigEr
     };
 
     let exclude = merge_excludes(cli, json)?;
+    let download_dir = merge_download_dir(cli, json);
+
+    if download_dir.is_some() && matches!(side, BuildSide::Local(_)) {
+        return Err(ConfigError("--download-dir needs a remote side, but --build scans the local one".to_string()));
+    }
 
     Ok(BuildConfig {
         side,
@@ -105,6 +113,7 @@ pub fn merge_build(cli: &Cli, json: &JsonConfig) -> Result<BuildConfig, ConfigEr
         exclude,
         csv,
         verbose: cli.verbose || json.verbose.unwrap_or(false),
+        download_dir,
     })
 }
 
@@ -137,6 +146,11 @@ pub fn merge(cli: &Cli, json: &JsonConfig) -> Result<EffectiveConfig, ConfigErro
     };
 
     let exclude = merge_excludes(cli, json)?;
+    let download_dir = merge_download_dir(cli, json);
+
+    if download_dir.is_some() && matches!(remote, RemoteSource::Csv(_)) {
+        return Err(ConfigError("--download-dir needs a live remote side, not --remote-csv".to_string()));
+    }
 
     Ok(EffectiveConfig {
         local,
@@ -145,7 +159,13 @@ pub fn merge(cli: &Cli, json: &JsonConfig) -> Result<EffectiveConfig, ConfigErro
         verbose: cli.verbose || json.verbose.unwrap_or(false),
         exclude,
         csv: cli.csv.clone(),
+        download_dir,
     })
+}
+
+/// The download directory: the CLI value wins over the JSON one.
+fn merge_download_dir(cli: &Cli, json: &JsonConfig) -> Option<PathBuf> {
+    cli.download_dir.clone().or_else(|| json.download_dir.clone())
 }
 
 /// Unions the JSON config's and the CLI's exclude patterns (JSON first)
@@ -186,6 +206,7 @@ mod tests {
             local_csv: None,
             remote_csv: None,
             build: false,
+            download_dir: None,
         }
     }
 
@@ -410,6 +431,45 @@ mod tests {
         let result = merge_build(&cli, &JsonConfig::default());
 
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn download_dir_prefers_cli_over_json() {
+        let mut cli = live_cli();
+        let json = JsonConfig { download_dir: Some(PathBuf::from("json-out")), ..Default::default() };
+
+        assert_eq!(merge(&cli, &json).unwrap().download_dir, Some(PathBuf::from("json-out")));
+
+        cli.download_dir = Some(PathBuf::from("cli-out"));
+        assert_eq!(merge(&cli, &json).unwrap().download_dir, Some(PathBuf::from("cli-out")));
+    }
+
+    #[test]
+    fn download_dir_is_rejected_with_remote_csv() {
+        let mut cli = empty_cli();
+        cli.connection.local_dir = Some(PathBuf::from("./l"));
+        cli.remote_csv = Some(PathBuf::from("snapshot.csv"));
+        cli.download_dir = Some(PathBuf::from("out"));
+
+        assert!(merge(&cli, &JsonConfig::default()).is_err());
+    }
+
+    #[test]
+    fn build_download_dir_needs_the_remote_side() {
+        let mut cli = empty_cli();
+        cli.build = true;
+        cli.csv = Some(PathBuf::from("out.csv"));
+        cli.download_dir = Some(PathBuf::from("out"));
+        cli.connection.local_dir = Some(PathBuf::from("./l"));
+
+        assert!(merge_build(&cli, &JsonConfig::default()).is_err());
+
+        cli.connection.local_dir = None;
+        cli.connection.host = Some("h".into());
+        cli.connection.user = Some("u".into());
+        cli.connection.remote_dir = Some("/r".into());
+
+        assert!(merge_build(&cli, &JsonConfig::default()).is_ok());
     }
 
     #[test]

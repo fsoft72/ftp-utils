@@ -44,6 +44,12 @@ pub struct Cli {
     /// --local-csv/--remote-csv.
     #[arg(long)]
     pub build: bool,
+
+    /// Also download every non-excluded remote file (binary mode) into this
+    /// directory, skipping files already there with the same size. Needs a
+    /// live remote side (not --remote-csv).
+    #[arg(long = "download-dir")]
+    pub download_dir: Option<PathBuf>,
 }
 
 #[cfg(test)]
@@ -157,5 +163,19 @@ mod tests {
         let cli = Cli::parse_from(["ftpdiff", "--build"]);
 
         assert!(cli.build);
+    }
+
+    #[test]
+    fn parses_download_dir_flag() {
+        let cli = Cli::parse_from(["ftpdiff", "--download-dir", "./out"]);
+
+        assert_eq!(cli.download_dir, Some(PathBuf::from("./out")));
+    }
+
+    #[test]
+    fn download_dir_defaults_to_none() {
+        let cli = Cli::parse_from(["ftpdiff"]);
+
+        assert_eq!(cli.download_dir, None);
     }
 }

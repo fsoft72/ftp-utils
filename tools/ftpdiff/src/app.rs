@@ -4,7 +4,8 @@
 //! without a server.
 
 use std::collections::HashMap;
-use std::path::Path;
+use std::fs::{self, File};
+use std::path::{Path, PathBuf};
 
 use ftp_utils_core::compare::compare_entries;
 use ftp_utils_core::connection::{ConnectionError, RemoteParams};
@@ -13,6 +14,7 @@ use ftp_utils_core::exclude::ExcludeSet;
 use ftp_utils_core::exit::{EXIT_FAILURES, EXIT_OK};
 use ftp_utils_core::ftp_client::SuppaFtpConnection;
 use ftp_utils_core::local::LocalEntry;
+use ftp_utils_core::paths::validate_relative_path;
 use ftp_utils_core::remote::RemoteEntry;
 use ftp_utils_core::{hash, local, remote, DiffEntry, DiffStatus, FtpConnection, FtpConnectionError};
 
@@ -176,6 +178,76 @@ fn write_csv(path: &Path, entries: &[ReportEntry], verbose: bool) -> Result<(), 
         .map_err(|e| CliError(format!("failed to write CSV to {}: {e}", path.display())))
 }
 
+/// Downloads every entry of `entries` (binary mode, streamed) from
+/// `remote_root` into `dest`, recreating subdirectories. A file already in
+/// `dest` with the same size is skipped. Each file is written to a
+/// temporary `.<name>.ftpdiff-part` file and renamed on success, so a
+/// failed transfer never leaves a truncated file under its final name.
+/// Returns `(downloaded, skipped)` counts.
+fn download_remote_files<C: FtpConnection>(
+    conn: &mut C,
+    remote_root: &str,
+    entries: &[RemoteEntry],
+    dest: &Path,
+    progress: &mut Progress,
+) -> Result<(usize, usize), CliError> {
+    let (mut downloaded, mut skipped) = (0, 0);
+
+    for entry in entries {
+        validate_relative_path(&entry.relative_path)
+            .map_err(|e| CliError(format!("refusing to download {}: {e}", entry.relative_path)))?;
+
+        let target = dest.join(&entry.relative_path);
+        if fs::metadata(&target).is_ok_and(|m| m.is_file() && m.len() == entry.size) {
+            skipped += 1;
+            continue;
+        }
+
+        if let Some(report) = progress.as_deref_mut() {
+            report(&format!("download {}", entry.relative_path));
+        }
+        download_one(conn, &remote::join_remote(remote_root, &entry.relative_path), &target)
+            .map_err(|e| CliError(format!("failed to download {}: {e}", entry.relative_path)))?;
+        downloaded += 1;
+    }
+
+    Ok((downloaded, skipped))
+}
+
+/// Streams `remote_path` to `target` through a temporary part file.
+fn download_one<C: FtpConnection>(conn: &mut C, remote_path: &str, target: &Path) -> Result<(), CliError> {
+    if let Some(parent) = target.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let name = target.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let part: PathBuf = target.with_file_name(format!(".{name}.ftpdiff-part"));
+
+    let result = File::create(&part)
+        .map_err(CliError::from)
+        .and_then(|mut file| conn.retr_to_writer(remote_path, &mut file).map(|_| ()).map_err(CliError::from));
+
+    match result {
+        Ok(()) => Ok(fs::rename(&part, target)?),
+        Err(e) => {
+            let _ = fs::remove_file(&part);
+            Err(e)
+        }
+    }
+}
+
+/// Runs the download and prints its summary line.
+fn download_and_report<C: FtpConnection>(
+    conn: &mut C,
+    remote_root: &str,
+    entries: &[RemoteEntry],
+    dest: &Path,
+    progress: &mut Progress,
+) -> Result<(), CliError> {
+    let (downloaded, skipped) = download_remote_files(conn, remote_root, entries, dest, progress)?;
+    println!("Downloaded {downloaded} files to {} ({skipped} skipped, same size).", dest.display());
+    Ok(())
+}
+
 /// The compare mode: load both sides, diff, optionally hash, report.
 fn run_compare(cli: &Cli, json_config: &JsonConfig) -> Result<i32, CliError> {
     let effective = config::merge(cli, json_config)?;
@@ -206,6 +278,12 @@ fn run_compare(cli: &Cli, json_config: &JsonConfig) -> Result<i32, CliError> {
             &mut entries,
             &mut progress,
         )?;
+    }
+
+    if let (Some(dest), Some(conn), RemoteSource::Live(params)) =
+        (&effective.download_dir, connection.as_mut(), &effective.remote)
+    {
+        download_and_report(conn, &params.remote_dir, &remote_entries, dest, &mut progress)?;
     }
 
     if let Some(conn) = connection {
@@ -304,6 +382,13 @@ fn run_build(cli: &Cli, json_config: &JsonConfig) -> Result<i32, CliError> {
         BuildSide::Remote(params) => {
             let mut conn = connect_remote(params, cli.connection.password.as_deref(), build.verbose)?;
             let entries = scan_remote(&mut conn, &params.remote_dir, &build.exclude, build.hash, &mut progress)?;
+            if let Some(dest) = &build.download_dir {
+                let files: Vec<RemoteEntry> = entries
+                    .iter()
+                    .filter_map(|e| Some(RemoteEntry { relative_path: e.relative_path.clone(), size: e.remote_size? }))
+                    .collect();
+                download_and_report(&mut conn, &params.remote_dir, &files, dest, &mut progress)?;
+            }
             conn.close();
             entries
         }
@@ -425,6 +510,64 @@ mod tests {
         .unwrap();
 
         assert_eq!(entries[0].status, DiffStatus::HashMismatch);
+    }
+
+    fn remote_entries() -> Vec<RemoteEntry> {
+        vec![
+            RemoteEntry { relative_path: "a.txt".into(), size: 5 },
+            RemoteEntry { relative_path: "sub/b.txt".into(), size: 5 },
+        ]
+    }
+
+    #[test]
+    fn download_writes_files_and_creates_subdirectories() {
+        let dest = tempfile::tempdir().unwrap();
+        let mut conn = MockFtpConnection { default_content: Some(b"hello".to_vec()), ..server() };
+
+        let counts = download_remote_files(&mut conn, "/remote", &remote_entries(), dest.path(), &mut None).unwrap();
+
+        assert_eq!(counts, (2, 0));
+        assert_eq!(std::fs::read(dest.path().join("a.txt")).unwrap(), b"hello");
+        assert_eq!(std::fs::read(dest.path().join("sub/b.txt")).unwrap(), b"hello");
+        assert!(!dest.path().join(".a.txt.ftpdiff-part").exists());
+    }
+
+    #[test]
+    fn download_skips_files_with_same_size_and_replaces_others() {
+        let dest = tempfile::tempdir().unwrap();
+        std::fs::write(dest.path().join("a.txt"), b"HELLO").unwrap(); // same size: kept
+        std::fs::create_dir(dest.path().join("sub")).unwrap();
+        std::fs::write(dest.path().join("sub/b.txt"), b"old").unwrap(); // different size: replaced
+        let mut conn = MockFtpConnection { default_content: Some(b"hello".to_vec()), ..server() };
+
+        let counts = download_remote_files(&mut conn, "/remote", &remote_entries(), dest.path(), &mut None).unwrap();
+
+        assert_eq!(counts, (1, 1));
+        assert_eq!(std::fs::read(dest.path().join("a.txt")).unwrap(), b"HELLO");
+        assert_eq!(std::fs::read(dest.path().join("sub/b.txt")).unwrap(), b"hello");
+    }
+
+    #[test]
+    fn download_refuses_paths_escaping_the_destination() {
+        let dest = tempfile::tempdir().unwrap();
+        let entries = vec![RemoteEntry { relative_path: "../evil.txt".into(), size: 1 }];
+
+        let err = download_remote_files(&mut server(), "/remote", &entries, dest.path(), &mut None).unwrap_err();
+
+        assert!(err.to_string().contains("evil.txt"), "{err}");
+    }
+
+    #[test]
+    fn download_error_names_the_file_and_leaves_no_partial_file() {
+        let dest = tempfile::tempdir().unwrap();
+        let mut conn = server();
+        conn.files.clear();
+
+        let err = download_remote_files(&mut conn, "/remote", &remote_entries(), dest.path(), &mut None).unwrap_err();
+
+        assert!(err.to_string().contains("a.txt"), "{err}");
+        assert!(!dest.path().join("a.txt").exists());
+        assert!(!dest.path().join(".a.txt.ftpdiff-part").exists());
     }
 
     #[test]
