@@ -101,3 +101,4 @@
   `--remote-csv`, and both error paths (missing `--csv`, both sides
   given).
 - Added `OPTIMIZE.md`: prioritized code review TODO list (security, performance, refactoring).
+- Reject absolute, `..` and empty paths in CSV rows (ftpops and ftpdiff CSV sources) via new `ftp_utils_core::paths`.

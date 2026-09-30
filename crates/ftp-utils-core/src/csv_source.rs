@@ -51,6 +51,8 @@ fn read_side(path: &Path, size_column: &str, md5_column: &str) -> Result<Vec<Raw
             .get(path_idx)
             .ok_or_else(|| CsvSourceError("row missing 'path' value".to_string()))?
             .to_string();
+        crate::paths::validate_relative_path(&relative_path)
+            .map_err(|e| CsvSourceError(format!("invalid CSV row: {e}")))?;
 
         let size_str = record.get(size_idx).unwrap_or("");
         let size = if size_str.is_empty() {
@@ -181,6 +183,14 @@ mod tests {
         let result = read_local_entries(&path);
 
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn errors_on_path_traversal_row() {
+        let (_dir, path) = write_csv(&format!("{HEADER}../../etc/x,Match,1,1,,\n"));
+
+        assert!(read_local_entries(&path).is_err());
+        assert!(read_remote_entries(&path).is_err());
     }
 
     #[test]

@@ -43,6 +43,8 @@ pub fn read_rows(path: &Path) -> Result<Vec<CsvRow>, CsvError> {
             .get(path_idx)
             .ok_or_else(|| CsvError("row missing 'path' value".to_string()))?
             .to_string();
+        ftp_utils_core::paths::validate_relative_path(&relative_path)
+            .map_err(|e| CsvError(format!("invalid CSV row: {e}")))?;
         let status = record
             .get(status_idx)
             .ok_or_else(|| CsvError("row missing 'status' value".to_string()))?
@@ -86,6 +88,15 @@ mod tests {
                 CsvRow { relative_path: "sub/b.txt".to_string(), status: "LocalOnly".to_string() },
             ]
         );
+    }
+
+    #[test]
+    fn rejects_rows_with_path_traversal_or_absolute_paths() {
+        for bad in ["../../etc/x", "/etc/passwd", "a/../../b"] {
+            let (_dir, path) = write_csv(&format!("path,status\n{bad},LocalOnly\n"));
+
+            assert!(read_rows(&path).is_err(), "{bad} should be rejected");
+        }
     }
 
     #[test]

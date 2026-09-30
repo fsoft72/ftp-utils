@@ -4,7 +4,7 @@
 
 ## Critical
 
-- [ ] **Validate CSV `relative_path` against path traversal** - `ftpops` joins the CSV `path` column straight onto `local_dir`/`remote_dir`, so a row like `../../etc/x` or an absolute path (`Path::join` replaces the base for absolute paths) lets a tampered or hand-edited CSV read, overwrite or delete files outside the target directory (`delete --on local` calls `remove_file` on it). Reject absolute paths, `..` components and empty paths when reading rows (and in `csv_source`), and fail fast with the offending row.
+- [x] **Validate CSV `relative_path` against path traversal** - `ftpops` joins the CSV `path` column straight onto `local_dir`/`remote_dir`, so a row like `../../etc/x` or an absolute path (`Path::join` replaces the base for absolute paths) lets a tampered or hand-edited CSV read, overwrite or delete files outside the target directory (`delete --on local` calls `remove_file` on it). Reject absolute paths, `..` components and empty paths when reading rows (and in `csv_source`), and fail fast with the offending row.
   - File(s): `tools/ftpops/src/csv_input.rs`, `tools/ftpops/src/ops.rs`, `crates/ftp-utils-core/src/csv_source.rs`
 - [ ] **Do not silently drop unparseable FTP listing lines** - `list_dir` does `let Ok(..) = parse_posix(..) else { continue }`, so any line the parser rejects (unusual server format, symlink, odd filename) vanishes from the remote tree. The diff then reports false `LocalOnly` entries, which `ftpops copy --to remote --filter local-only` will happily re-upload or `delete --on local` will remove. Return an error (or at least a warning counted in the summary) for lines that cannot be parsed, and consider `MLSD` when the server supports it.
   - File(s): `crates/ftp-utils-core/src/ftp_client.rs`

@@ -12,6 +12,7 @@ pub mod exclude;
 pub mod ftp_client;
 pub mod hash;
 pub mod local;
+pub mod paths;
 pub mod remote;
 
 pub use diff::{DiffEntry, DiffStatus};
