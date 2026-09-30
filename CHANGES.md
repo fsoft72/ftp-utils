@@ -104,3 +104,4 @@
 - Reject absolute, `..` and empty paths in CSV rows (ftpops and ftpdiff CSV sources) via new `ftp_utils_core::paths`.
 - FTP listing parser now errors on unparseable lines (skipping only blank, `total`, `.`, `..`) and falls back to the DOS format.
 - `ftpops copy --skip-existing` now reports a failure instead of overwriting when the remote existence check fails.
+- `ftpops delete` now asks for confirmation (`--yes` to skip); aborts with exit code 2 otherwise.

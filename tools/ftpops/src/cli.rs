@@ -64,6 +64,10 @@ pub enum Command {
         /// Print what would be done without doing it.
         #[arg(long)]
         dry_run: bool,
+
+        /// Do not ask for confirmation before deleting.
+        #[arg(long)]
+        yes: bool,
     },
 }
 
@@ -133,6 +137,20 @@ mod tests {
                 assert_eq!(csv, PathBuf::from("report.csv"));
                 assert!(!dry_run);
             }
+            Command::Copy { .. } => panic!("expected Delete"),
+        }
+    }
+
+    #[test]
+    fn delete_requires_confirmation_unless_yes_is_given() {
+        let base = ["ftpops", "delete", "--on", "local", "--filter", "local-only", "--csv", "r.csv"];
+
+        match Cli::parse_from(base).command {
+            Command::Delete { yes, .. } => assert!(!yes),
+            Command::Copy { .. } => panic!("expected Delete"),
+        }
+        match Cli::parse_from([&base[..], &["--yes"]].concat()).command {
+            Command::Delete { yes, .. } => assert!(yes),
             Command::Copy { .. } => panic!("expected Delete"),
         }
     }

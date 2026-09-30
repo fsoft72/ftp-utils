@@ -40,7 +40,12 @@ Deletes files locally or remotely.
 | `--filter <remote-only\|local-only>` | Only operate on rows with this diff status |
 | `--csv <path>` | Path to the `ftpdiff --csv` report to read |
 | `--dry-run` | Print what would be done without doing it |
+| `--yes` | Do not ask for confirmation before deleting (required for non-interactive use) |
 | *(plus all connection flags - see below)* | |
+
+Without `--yes`, `delete` prints how many files it is about to delete and
+asks `[y/N]` on stderr; any answer other than `y`/`yes` (or EOF) aborts with
+exit code `2` and deletes nothing. `--dry-run` never prompts.
 
 ### Connection flags (both subcommands)
 

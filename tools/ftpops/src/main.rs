@@ -5,6 +5,7 @@
 //! design this binary implements.
 
 mod cli;
+mod confirm;
 mod csv_input;
 mod filter;
 mod ops;
@@ -36,12 +37,12 @@ fn run() -> i32 {
             }
             run_copy(&connection, to, filter, &csv, skip_existing, dry_run)
         }
-        Command::Delete { connection, on, filter, csv, dry_run } => {
+        Command::Delete { connection, on, filter, csv, dry_run, yes } => {
             if let Err(e) = validate::validate_delete(on, filter) {
                 eprintln!("Error: {e}");
                 return 2;
             }
-            run_delete(&connection, on, filter, &csv, dry_run)
+            run_delete(&connection, on, filter, &csv, dry_run, yes)
         }
     }
 }
@@ -150,7 +151,14 @@ fn run_copy(
     }
 }
 
-fn run_delete(connection_args: &ConnectionArgs, on: DeleteTarget, filter: Filter, csv_path: &Path, dry_run: bool) -> i32 {
+fn run_delete(
+    connection_args: &ConnectionArgs,
+    on: DeleteTarget,
+    filter: Filter,
+    csv_path: &Path,
+    dry_run: bool,
+    yes: bool,
+) -> i32 {
     let effective = match load_effective_connection(connection_args) {
         Ok(c) => c,
         Err(code) => return code,
@@ -168,6 +176,29 @@ fn run_delete(connection_args: &ConnectionArgs, on: DeleteTarget, filter: Filter
         }
         println!("Would delete {} file(s).", filtered.len());
         return 0;
+    }
+
+    if !yes && !filtered.is_empty() {
+        let (side, dir) = match on {
+            DeleteTarget::Local => ("local", effective.local_dir.display().to_string()),
+            DeleteTarget::Remote => ("remote", effective.remote_dir.clone()),
+        };
+        let prompt = format!(
+            "About to delete {} file(s) on the {side} side under {dir}, based on {}. Continue?",
+            filtered.len(),
+            csv_path.display()
+        );
+        match confirm::confirm(&prompt) {
+            Ok(true) => {}
+            Ok(false) => {
+                eprintln!("Aborted: nothing was deleted (use --yes to skip this prompt).");
+                return 2;
+            }
+            Err(e) => {
+                eprintln!("Error: failed to read confirmation: {e}");
+                return 2;
+            }
+        }
     }
 
     let results = match on {
