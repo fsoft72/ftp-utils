@@ -6,6 +6,7 @@
 
 mod compare;
 mod log;
+mod store;
 mod timefmt;
 
 fn main() {}

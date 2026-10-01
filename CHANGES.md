@@ -132,3 +132,4 @@
 - Moved the streaming downloader (`.part` file, same-size skip, path validation) from ftpdiff into `ftp_utils_core::download`; the temporary file is now `.<name>.ftp-part`.
 - Added the `ftpwatch` crate skeleton with the pure snapshot comparison (new/deleted/modified; size + mtime at day precision).
 - ftpwatch: UTC time formatting and the plain-text change log formatter.
+- ftpwatch: site directory layout and atomic snapshot/log files.
