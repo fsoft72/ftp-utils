@@ -210,6 +210,15 @@ fn parse_hash_response(reply: &str) -> Option<String> {
         .map(|token| token.to_ascii_lowercase())
 }
 
+/// Converts a listing timestamp to Unix seconds (UTC); times before the
+/// epoch are negative.
+fn _unix_seconds(time: std::time::SystemTime) -> i64 {
+    match time.duration_since(std::time::UNIX_EPOCH) {
+        Ok(after) => after.as_secs() as i64,
+        Err(before) => -(before.duration().as_secs() as i64),
+    }
+}
+
 /// Parses raw `LIST` output lines into entries. Blank lines and the
 /// `total N` header some servers emit are skipped, as are `.`/`..`. Any
 /// other line that neither the POSIX nor the DOS parser understands is an
@@ -229,7 +238,12 @@ fn parse_listing(lines: &[String]) -> Result<Vec<RawRemoteEntry>, FtpConnectionE
         if name == "." || name == ".." {
             continue;
         }
-        entries.push(RawRemoteEntry { name: name.to_string(), is_dir: file.is_directory(), size: file.size() as u64 });
+        entries.push(RawRemoteEntry {
+            name: name.to_string(),
+            is_dir: file.is_directory(),
+            size: file.size() as u64,
+            modified: Some(_unix_seconds(file.modified())),
+        });
     }
     Ok(entries)
 }
@@ -324,6 +338,16 @@ mod tests {
 
     fn lines(input: &[&str]) -> Vec<String> {
         input.iter().map(|l| l.to_string()).collect()
+    }
+
+    #[test]
+    fn listing_carries_the_modification_time() {
+        // A date with a year (no time of day) is how LIST shows old files.
+        let entries = parse_listing(&lines(&["-rw-r--r-- 1 user group 1204 Jan  5  2020 old.php"])).unwrap();
+
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].name, "old.php");
+        assert_eq!(entries[0].modified, Some(1_578_182_400)); // 2020-01-05 00:00:00 UTC
     }
 
     #[test]

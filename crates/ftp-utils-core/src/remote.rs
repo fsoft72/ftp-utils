@@ -13,6 +13,9 @@ pub struct RawRemoteEntry {
     pub name: String,
     pub is_dir: bool,
     pub size: u64,
+    /// Modification time as Unix seconds (UTC), `None` if the listing had
+    /// no usable date.
+    pub modified: Option<i64>,
 }
 
 /// A file found while recursively walking the remote directory tree.
@@ -20,6 +23,8 @@ pub struct RawRemoteEntry {
 pub struct RemoteEntry {
     pub relative_path: String,
     pub size: u64,
+    /// Modification time as Unix seconds (UTC), `None` if unknown.
+    pub modified: Option<i64>,
 }
 
 crate::message_error! {
@@ -171,7 +176,7 @@ where
                 cb(&format!("remote: {relative_path}"));
             }
 
-            let entry = RemoteEntry { relative_path, size: item.size };
+            let entry = RemoteEntry { relative_path, size: item.size, modified: item.modified };
             on_file(conn, &entry)?;
             entries.push(entry);
         }
@@ -193,6 +198,24 @@ mod tests {
     }
 
     #[test]
+    fn walk_propagates_the_modification_time() {
+        let mut listings = HashMap::new();
+        listings.insert(
+            "/remote".to_string(),
+            vec![
+                RawRemoteEntry { name: "a.txt".into(), is_dir: false, size: 1, modified: Some(1_000_000_000) },
+                RawRemoteEntry { name: "b.txt".into(), is_dir: false, size: 2, modified: None },
+            ],
+        );
+        let mut conn = mock(listings);
+
+        let entries = walk_remote(&mut conn, "/remote", &ExcludeSet::default(), None).unwrap();
+
+        assert_eq!(entries[0].modified, Some(1_000_000_000));
+        assert_eq!(entries[1].modified, None);
+    }
+
+    #[test]
     fn join_remote_uses_exactly_one_separator() {
         assert_eq!(join_remote("/remote", "a.txt"), "/remote/a.txt");
         assert_eq!(join_remote("/remote/", "a.txt"), "/remote/a.txt");
@@ -204,13 +227,19 @@ mod tests {
     #[test]
     fn walks_nested_directories_under_root_with_trailing_slash() {
         let mut listings = HashMap::new();
-        listings.insert("/".to_string(), vec![RawRemoteEntry { name: "sub".into(), is_dir: true, size: 0 }]);
-        listings.insert("/sub".to_string(), vec![RawRemoteEntry { name: "b.txt".into(), is_dir: false, size: 1 }]);
+        listings.insert(
+            "/".to_string(),
+            vec![RawRemoteEntry { name: "sub".into(), is_dir: true, size: 0, modified: None }],
+        );
+        listings.insert(
+            "/sub".to_string(),
+            vec![RawRemoteEntry { name: "b.txt".into(), is_dir: false, size: 1, modified: None }],
+        );
         let mut conn = mock(listings);
 
         let entries = walk_remote(&mut conn, "/", &ExcludeSet::default(), None).unwrap();
 
-        assert_eq!(entries, vec![RemoteEntry { relative_path: "sub/b.txt".to_string(), size: 1 }]);
+        assert_eq!(entries, vec![RemoteEntry { relative_path: "sub/b.txt".to_string(), size: 1, modified: None }]);
     }
 
     #[test]
@@ -219,9 +248,9 @@ mod tests {
         listings.insert(
             "/remote".to_string(),
             vec![
-                RawRemoteEntry { name: "a.txt".into(), is_dir: false, size: 1 },
-                RawRemoteEntry { name: "skip.tmp".into(), is_dir: false, size: 1 },
-                RawRemoteEntry { name: "b.txt".into(), is_dir: false, size: 2 },
+                RawRemoteEntry { name: "a.txt".into(), is_dir: false, size: 1, modified: None },
+                RawRemoteEntry { name: "skip.tmp".into(), is_dir: false, size: 1, modified: None },
+                RawRemoteEntry { name: "b.txt".into(), is_dir: false, size: 2, modified: None },
             ],
         );
         let mut conn = mock(listings);
@@ -250,12 +279,14 @@ mod tests {
         listings.insert(
             "/remote".to_string(),
             vec![
-                RawRemoteEntry { name: "a.txt".into(), is_dir: false, size: 10 },
-                RawRemoteEntry { name: "sub".into(), is_dir: true, size: 0 },
+                RawRemoteEntry { name: "a.txt".into(), is_dir: false, size: 10, modified: None },
+                RawRemoteEntry { name: "sub".into(), is_dir: true, size: 0, modified: None },
             ],
         );
-        listings
-            .insert("/remote/sub".to_string(), vec![RawRemoteEntry { name: "b.txt".into(), is_dir: false, size: 20 }]);
+        listings.insert(
+            "/remote/sub".to_string(),
+            vec![RawRemoteEntry { name: "b.txt".into(), is_dir: false, size: 20, modified: None }],
+        );
         let mut conn = mock(listings);
 
         let mut entries = walk_remote(&mut conn, "/remote", &ExcludeSet::default(), None).unwrap();
@@ -264,8 +295,8 @@ mod tests {
         assert_eq!(
             entries,
             vec![
-                RemoteEntry { relative_path: "a.txt".to_string(), size: 10 },
-                RemoteEntry { relative_path: "sub/b.txt".to_string(), size: 20 },
+                RemoteEntry { relative_path: "a.txt".to_string(), size: 10, modified: None },
+                RemoteEntry { relative_path: "sub/b.txt".to_string(), size: 20, modified: None },
             ]
         );
     }
@@ -276,8 +307,8 @@ mod tests {
         listings.insert(
             "/remote".to_string(),
             vec![
-                RawRemoteEntry { name: ".git".into(), is_dir: true, size: 0 },
-                RawRemoteEntry { name: "keep.txt".into(), is_dir: false, size: 1 },
+                RawRemoteEntry { name: ".git".into(), is_dir: true, size: 0, modified: None },
+                RawRemoteEntry { name: "keep.txt".into(), is_dir: false, size: 1, modified: None },
             ],
         );
         // No "/remote/.git" listing: MockFtpConnection errors if it is listed.
@@ -296,8 +327,8 @@ mod tests {
         listings.insert(
             "/remote".to_string(),
             vec![
-                RawRemoteEntry { name: "keep.txt".into(), is_dir: false, size: 1 },
-                RawRemoteEntry { name: "skip.tmp".into(), is_dir: false, size: 1 },
+                RawRemoteEntry { name: "keep.txt".into(), is_dir: false, size: 1, modified: None },
+                RawRemoteEntry { name: "skip.tmp".into(), is_dir: false, size: 1, modified: None },
             ],
         );
         let mut conn = mock(listings);
@@ -315,8 +346,8 @@ mod tests {
         listings.insert(
             "/remote".to_string(),
             vec![
-                RawRemoteEntry { name: "keep.txt".into(), is_dir: false, size: 1 },
-                RawRemoteEntry { name: "skip.tmp".into(), is_dir: false, size: 1 },
+                RawRemoteEntry { name: "keep.txt".into(), is_dir: false, size: 1, modified: None },
+                RawRemoteEntry { name: "skip.tmp".into(), is_dir: false, size: 1, modified: None },
             ],
         );
         let mut conn = mock(listings);
@@ -344,7 +375,8 @@ mod tests {
     #[test]
     fn ensure_remote_dir_skips_components_that_already_exist() {
         let mut listings = HashMap::new();
-        listings.insert("/".to_string(), vec![RawRemoteEntry { name: "a".into(), is_dir: true, size: 0 }]);
+        listings
+            .insert("/".to_string(), vec![RawRemoteEntry { name: "a".into(), is_dir: true, size: 0, modified: None }]);
         listings.insert("/a".to_string(), vec![]);
         let mut conn = mock(listings);
 

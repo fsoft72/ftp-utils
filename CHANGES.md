@@ -127,3 +127,4 @@
 - Added `ftpdiff --download-dir <PATH>` (JSON `download_dir`): downloads every non-excluded remote file in binary mode while the remote walk runs (new `remote::walk_remote_with` callback), streamed via a `.part` file renamed on success, skipping files already present with the same size; rejects `..`/absolute paths; needs a live remote side (also works with `--build` on the remote).
 - Git hooks: `pre-commit` now only refreshes the codegraph index (optional, never blocks); removed dprint formatting and pnpm lockfile regeneration from the hook and its README.
 - Added design spec for `ftpwatch` (`docs/superpowers/specs/2026-10-01-ftpwatch-design.md`): site monitor with `init` (full download + baseline snapshot) and `check` (listing-only scan, size+mtime comparison, text log).
+- Remote listings now carry the file modification time (`RawRemoteEntry::modified`, `RemoteEntry::modified`, Unix seconds UTC).

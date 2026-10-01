@@ -55,7 +55,7 @@ mod tests {
 
     #[test]
     fn detects_remote_only() {
-        let remote = vec![RemoteEntry { relative_path: "a.txt".into(), size: 5 }];
+        let remote = vec![RemoteEntry { relative_path: "a.txt".into(), size: 5, modified: None }];
         let result = compare_entries(&[], &remote);
 
         assert_eq!(result.len(), 1);
@@ -70,8 +70,8 @@ mod tests {
             LocalEntry { relative_path: "diff.txt".into(), size: 10 },
         ];
         let remote = vec![
-            RemoteEntry { relative_path: "match.txt".into(), size: 10 },
-            RemoteEntry { relative_path: "diff.txt".into(), size: 20 },
+            RemoteEntry { relative_path: "match.txt".into(), size: 10, modified: None },
+            RemoteEntry { relative_path: "diff.txt".into(), size: 20, modified: None },
         ];
 
         let result = compare_entries(&local, &remote);

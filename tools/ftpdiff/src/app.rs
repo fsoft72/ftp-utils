@@ -436,8 +436,8 @@ mod tests {
         listings.insert(
             "/remote".to_string(),
             vec![
-                RawRemoteEntry { name: "a.txt".into(), is_dir: false, size: 5 },
-                RawRemoteEntry { name: "skip.tmp".into(), is_dir: false, size: 1 },
+                RawRemoteEntry { name: "a.txt".into(), is_dir: false, size: 5, modified: None },
+                RawRemoteEntry { name: "skip.tmp".into(), is_dir: false, size: 1, modified: None },
             ],
         );
         let mut files = HashMap::new();
@@ -542,7 +542,7 @@ mod tests {
 
         let entries = download_walk(&mut conn, dest.path()).unwrap();
 
-        assert_eq!(entries, vec![RemoteEntry { relative_path: "a.txt".into(), size: 5 }]);
+        assert_eq!(entries, vec![RemoteEntry { relative_path: "a.txt".into(), size: 5, modified: None }]);
         assert_eq!(std::fs::read(dest.path().join("a.txt")).unwrap(), b"hello");
         assert!(!dest.path().join("skip.tmp").exists());
         assert!(!dest.path().join(".a.txt.ftpdiff-part").exists());
@@ -552,9 +552,16 @@ mod tests {
     fn download_creates_subdirectories() {
         let dest = tempfile::tempdir().unwrap();
         let mut conn = server();
-        conn.listings.get_mut("/remote").unwrap().push(RawRemoteEntry { name: "sub".into(), is_dir: true, size: 0 });
-        conn.listings
-            .insert("/remote/sub".into(), vec![RawRemoteEntry { name: "b.txt".into(), is_dir: false, size: 5 }]);
+        conn.listings.get_mut("/remote").unwrap().push(RawRemoteEntry {
+            name: "sub".into(),
+            is_dir: true,
+            size: 0,
+            modified: None,
+        });
+        conn.listings.insert(
+            "/remote/sub".into(),
+            vec![RawRemoteEntry { name: "b.txt".into(), is_dir: false, size: 5, modified: None }],
+        );
         conn.files.insert("/remote/sub/b.txt".into(), b"hello".to_vec());
 
         download_walk(&mut conn, dest.path()).unwrap();
@@ -580,7 +587,7 @@ mod tests {
         let dest = tempfile::tempdir().unwrap();
         let mut downloader =
             Downloader { dest: dest.path(), remote_root: "/remote", verbose: false, downloaded: 0, skipped: 0 };
-        let entry = RemoteEntry { relative_path: "../evil.txt".into(), size: 1 };
+        let entry = RemoteEntry { relative_path: "../evil.txt".into(), size: 1, modified: None };
 
         let err = downloader.fetch(&mut server(), &entry).unwrap_err();
 

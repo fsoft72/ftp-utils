@@ -238,7 +238,7 @@ pub fn read_remote_entries(path: &Path) -> Result<(Vec<RemoteEntry>, HashMap<Str
             if let Some(md5) = row.md5 {
                 known_md5.insert(row.relative_path.clone(), md5);
             }
-            entries.push(RemoteEntry { relative_path: row.relative_path, size });
+            entries.push(RemoteEntry { relative_path: row.relative_path, size, modified: None });
         }
     }
 
@@ -283,7 +283,7 @@ mod tests {
 
         let (entries, known_md5) = read_remote_entries(&path).unwrap();
 
-        assert_eq!(entries, vec![RemoteEntry { relative_path: "a.txt".to_string(), size: 10 }]);
+        assert_eq!(entries, vec![RemoteEntry { relative_path: "a.txt".to_string(), size: 10, modified: None }]);
         assert_eq!(known_md5.get("a.txt"), Some(&"abc".to_string()));
         assert_eq!(known_md5.get("c.txt"), None);
     }

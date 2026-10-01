@@ -300,8 +300,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("file.txt"), b"local content").unwrap();
         let mut conn = MockFtpConnection::default();
-        conn.listings
-            .insert("/remote".to_string(), vec![RawRemoteEntry { name: "file.txt".into(), is_dir: false, size: 5 }]);
+        conn.listings.insert(
+            "/remote".to_string(),
+            vec![RawRemoteEntry { name: "file.txt".into(), is_dir: false, size: 5, modified: None }],
+        );
 
         let rows = [row("file.txt")];
         let refs: Vec<&StatusRow> = rows.iter().collect();

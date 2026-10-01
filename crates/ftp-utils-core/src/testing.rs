@@ -85,6 +85,7 @@ impl FtpConnection for MockFtpConnection {
             name: name.to_string(),
             is_dir: true,
             size: 0,
+            modified: None,
         });
         self.listings.entry(path.to_string()).or_default();
 
