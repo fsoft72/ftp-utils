@@ -133,3 +133,4 @@
 - Added the `ftpwatch` crate skeleton with the pure snapshot comparison (new/deleted/modified; size + mtime at day precision).
 - ftpwatch: UTC time formatting and the plain-text change log formatter.
 - ftpwatch: site directory layout and atomic snapshot/log files.
+- ftpwatch: `init` (download + baseline) and `check` (listing-only scan, log, new snapshot) commands, site config.json, and CLI.

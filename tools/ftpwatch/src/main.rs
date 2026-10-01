@@ -2,11 +2,29 @@
 //!
 //! See `docs/superpowers/specs/2026-10-01-ftpwatch-design.md`.
 
-#![allow(dead_code)]
-
+mod app;
+mod cli;
 mod compare;
+mod config;
 mod log;
 mod store;
 mod timefmt;
 
-fn main() {}
+use clap::Parser;
+use ftp_utils_core::exit::EXIT_ERROR;
+
+use cli::Cli;
+
+fn main() {
+    let cli = Cli::parse();
+
+    let code = match app::run(&cli) {
+        Ok(code) => code,
+        Err(e) => {
+            eprintln!("Error: {e}");
+            EXIT_ERROR
+        }
+    };
+
+    std::process::exit(code);
+}
