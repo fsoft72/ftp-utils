@@ -4,17 +4,16 @@
 //! without a server.
 
 use std::collections::HashMap;
-use std::fs::{self, File};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use ftp_utils_core::compare::compare_entries;
 use ftp_utils_core::connection::{ConnectionError, RemoteParams};
 use ftp_utils_core::csv_source::{self, CsvSourceError, ReportEntry};
+use ftp_utils_core::download::{DownloadError, Downloader};
 use ftp_utils_core::exclude::ExcludeSet;
 use ftp_utils_core::exit::{EXIT_FAILURES, EXIT_OK};
 use ftp_utils_core::ftp_client::SuppaFtpConnection;
 use ftp_utils_core::local::LocalEntry;
-use ftp_utils_core::paths::validate_relative_path;
 use ftp_utils_core::remote::RemoteEntry;
 use ftp_utils_core::{hash, local, remote, DiffEntry, DiffStatus, FtpConnection, FtpConnectionError};
 
@@ -45,6 +44,11 @@ impl From<FtpConnectionError> for CliError {
     }
 }
 
+impl From<DownloadError> for CliError {
+    fn from(e: DownloadError) -> Self {
+        CliError(e.to_string())
+    }
+}
 impl From<std::io::Error> for CliError {
     fn from(e: std::io::Error) -> Self {
         CliError(e.to_string())
@@ -178,62 +182,6 @@ fn write_csv(path: &Path, entries: &[ReportEntry], verbose: bool) -> Result<(), 
         .map_err(|e| CliError(format!("failed to write CSV to {}: {e}", path.display())))
 }
 
-/// Downloads remote files (binary mode, streamed) into one directory as the
-/// remote walk lists them, recreating subdirectories. A file already there
-/// with the same size is skipped. Each file is written to a temporary
-/// `.<name>.ftpdiff-part` file and renamed on success, so a failed transfer
-/// never leaves a truncated file under its final name.
-struct Downloader<'a> {
-    dest: &'a Path,
-    remote_root: &'a str,
-    verbose: bool,
-    downloaded: usize,
-    skipped: usize,
-}
-
-impl Downloader<'_> {
-    /// Fetches one listed file, or skips it if it is already up to date.
-    fn fetch<C: FtpConnection>(&mut self, conn: &mut C, entry: &RemoteEntry) -> Result<(), CliError> {
-        validate_relative_path(&entry.relative_path)
-            .map_err(|e| CliError(format!("refusing to download {}: {e}", entry.relative_path)))?;
-
-        let target = self.dest.join(&entry.relative_path);
-        if fs::metadata(&target).is_ok_and(|m| m.is_file() && m.len() == entry.size) {
-            self.skipped += 1;
-            return Ok(());
-        }
-
-        if self.verbose {
-            eprintln!("Downloading {}", entry.relative_path);
-        }
-        download_one(conn, &remote::join_remote(self.remote_root, &entry.relative_path), &target)
-            .map_err(|e| CliError(format!("failed to download {}: {e}", entry.relative_path)))?;
-        self.downloaded += 1;
-        Ok(())
-    }
-}
-
-/// Streams `remote_path` to `target` through a temporary part file.
-fn download_one<C: FtpConnection>(conn: &mut C, remote_path: &str, target: &Path) -> Result<(), CliError> {
-    if let Some(parent) = target.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    let name = target.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-    let part: PathBuf = target.with_file_name(format!(".{name}.ftpdiff-part"));
-
-    let result = File::create(&part)
-        .map_err(CliError::from)
-        .and_then(|mut file| conn.retr_to_writer(remote_path, &mut file).map(|_| ()).map_err(CliError::from));
-
-    match result {
-        Ok(()) => Ok(fs::rename(&part, target)?),
-        Err(e) => {
-            let _ = fs::remove_file(&part);
-            Err(e)
-        }
-    }
-}
-
 /// Walks the remote tree; when `download_dir` is set, each file is
 /// downloaded right when the walk lists it, and a summary line is printed.
 fn walk_and_download<C: FtpConnection>(
@@ -248,9 +196,9 @@ fn walk_and_download<C: FtpConnection>(
         return Ok(remote::walk_remote(conn, remote_root, exclude, progress.as_deref_mut())?);
     };
 
-    let mut downloader = Downloader { dest, remote_root, verbose, downloaded: 0, skipped: 0 };
+    let mut downloader = Downloader::new(dest, remote_root, verbose);
     let entries = remote::walk_remote_with(conn, remote_root, exclude, progress.as_deref_mut(), |conn, entry| {
-        downloader.fetch(conn, entry)
+        downloader.fetch(conn, entry).map_err(CliError::from)
     })?;
 
     println!(
@@ -545,7 +493,7 @@ mod tests {
         assert_eq!(entries, vec![RemoteEntry { relative_path: "a.txt".into(), size: 5, modified: None }]);
         assert_eq!(std::fs::read(dest.path().join("a.txt")).unwrap(), b"hello");
         assert!(!dest.path().join("skip.tmp").exists());
-        assert!(!dest.path().join(".a.txt.ftpdiff-part").exists());
+        assert!(!dest.path().join(".a.txt.ftp-part").exists());
     }
 
     #[test]
@@ -583,18 +531,6 @@ mod tests {
     }
 
     #[test]
-    fn download_refuses_paths_escaping_the_destination() {
-        let dest = tempfile::tempdir().unwrap();
-        let mut downloader =
-            Downloader { dest: dest.path(), remote_root: "/remote", verbose: false, downloaded: 0, skipped: 0 };
-        let entry = RemoteEntry { relative_path: "../evil.txt".into(), size: 1, modified: None };
-
-        let err = downloader.fetch(&mut server(), &entry).unwrap_err();
-
-        assert!(err.to_string().contains("evil.txt"), "{err}");
-    }
-
-    #[test]
     fn download_error_names_the_file_and_leaves_no_partial_file() {
         let dest = tempfile::tempdir().unwrap();
         let mut conn = server();
@@ -604,7 +540,7 @@ mod tests {
 
         assert!(err.to_string().contains("a.txt"), "{err}");
         assert!(!dest.path().join("a.txt").exists());
-        assert!(!dest.path().join(".a.txt.ftpdiff-part").exists());
+        assert!(!dest.path().join(".a.txt.ftp-part").exists());
     }
 
     #[test]

@@ -129,3 +129,4 @@
 - Added design spec for `ftpwatch` (`docs/superpowers/specs/2026-10-01-ftpwatch-design.md`): site monitor with `init` (full download + baseline snapshot) and `check` (listing-only scan, size+mtime comparison, text log).
 - Remote listings now carry the file modification time (`RawRemoteEntry::modified`, `RemoteEntry::modified`, Unix seconds UTC).
 - CSV reports gained an optional trailing `remote_mtime` column (Unix seconds UTC); old reports without it still read fine. `ftpdiff --build` records it for remote scans.
+- Moved the streaming downloader (`.part` file, same-size skip, path validation) from ftpdiff into `ftp_utils_core::download`; the temporary file is now `.<name>.ftp-part`.

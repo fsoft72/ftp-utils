@@ -11,6 +11,7 @@ pub mod compare;
 pub mod connection;
 pub mod csv_source;
 pub mod diff;
+pub mod download;
 pub mod error;
 pub mod exclude;
 pub mod exit;
