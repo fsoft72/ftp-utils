@@ -113,10 +113,12 @@ pub fn read_snapshot(path: &Path) -> Result<Vec<RemoteEntry>, StoreError> {
         .map_err(|e| StoreError(format!("cannot read snapshot {}: {e}", path.display())))
 }
 
-/// Writes `text` to `path`, creating parent directories.
+/// Writes `text` to `path` atomically (via a `.part` file), creating parent directories.
 pub fn write_log(path: &Path, text: &str) -> Result<(), StoreError> {
     _create_parent(path)?;
-    fs::write(path, text).map_err(|e| StoreError(format!("cannot write log {}: {e}", path.display())))
+    let part = path.with_extension("log.part");
+    fs::write(&part, text).map_err(|e| StoreError(format!("cannot write log {}: {e}", path.display())))?;
+    fs::rename(&part, path).map_err(|e| StoreError(format!("cannot write log {}: {e}", path.display())))
 }
 
 #[cfg(test)]
@@ -183,6 +185,7 @@ mod tests {
         write_log(&site.log_path("2026-10-01_030000"), "hello\n").unwrap();
 
         assert_eq!(std::fs::read_to_string(site.log_path("2026-10-01_030000")).unwrap(), "hello\n");
+        assert!(!site.log_path("2026-10-01_030000").with_extension("log.part").exists());
     }
 
     #[test]

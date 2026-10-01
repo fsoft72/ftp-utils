@@ -1,7 +1,7 @@
 //! Pure comparison of two remote snapshots: what is new, deleted or
 //! modified between a previous scan and the current one.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use ftp_utils_core::remote::RemoteEntry;
 
@@ -23,7 +23,7 @@ pub enum ChangeKind {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FileState {
     pub size: u64,
-    /// Unix seconds (UTC), `None` if the listing had no usable date.
+    /// Unix seconds as printed by the server (its local time, treated as UTC), `None` if the listing had no usable date.
     pub modified: Option<i64>,
 }
 
@@ -45,6 +45,7 @@ pub struct Comparison {
     pub unchanged: usize,
 }
 
+/// Extracts the size and mtime of a snapshot entry.
 fn _state(entry: &RemoteEntry) -> FileState {
     FileState { size: entry.size, modified: entry.modified }
 }
@@ -66,7 +67,7 @@ fn _is_modified(old: &FileState, new: &FileState) -> bool {
 pub fn compare_snapshots(previous: &[RemoteEntry], current: &[RemoteEntry]) -> Comparison {
     let old_by_path: HashMap<&str, FileState> =
         previous.iter().map(|e| (e.relative_path.as_str(), _state(e))).collect();
-    let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
+    let mut seen: HashSet<&str> = HashSet::new();
     let mut comparison = Comparison::default();
 
     for entry in current {

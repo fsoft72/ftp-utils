@@ -3,7 +3,7 @@
 //! functions generic over `FtpConnection` so it can be tested without a
 //! server.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use ftp_utils_core::connection::{self, ConnectionError, RemoteParams};
 use ftp_utils_core::download::{DownloadError, Downloader};
@@ -94,7 +94,7 @@ fn run_init(common: &CommonArgs, force: bool) -> Result<i32, CliError> {
 fn run_check(common: &CommonArgs) -> Result<i32, CliError> {
     let site = SiteDir::new(common.site_dir.clone());
     let settings = config::load(&site.config_path())?;
-    let site_name = site.root().file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let site_name = _site_name(site.root());
 
     // Verify the baseline before connecting, so a missing one never reaches the password prompt.
     _latest_snapshot_or_error(&site)?;
@@ -110,7 +110,26 @@ fn run_check(common: &CommonArgs) -> Result<i32, CliError> {
         comparison.unchanged,
         site.log_path(&format_stamp(now)).display()
     );
-    Ok(if comparison.changes.is_empty() { EXIT_OK } else { EXIT_FAILURES })
+    Ok(exit_code_for(&comparison))
+}
+
+/// Exit code of a `check`: `EXIT_OK` without changes, `EXIT_FAILURES` otherwise.
+fn exit_code_for(comparison: &Comparison) -> i32 {
+    if comparison.changes.is_empty() {
+        EXIT_OK
+    } else {
+        EXIT_FAILURES
+    }
+}
+
+/// Derives the site name from the directory name, resolving the path first so
+/// `.` still yields a name; falls back to the path's display string.
+fn _site_name(root: &Path) -> String {
+    let resolved = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+    match resolved.file_name() {
+        Some(name) => name.to_string_lossy().into_owned(),
+        None => resolved.display().to_string(),
+    }
 }
 
 /// Fails if the site already has a snapshot, unless `force` is set, so a
@@ -307,7 +326,7 @@ mod tests {
     }
 
     #[test]
-    fn check_without_changes_logs_nothing_new_and_downloads_nothing() {
+    fn check_without_changes_writes_a_clean_log_and_downloads_nothing() {
         let (_dir, site) = site_with_baseline(&[entry("index.php", 5, T0)]);
         let mut conn = server(vec![("/site", vec![file("index.php", 5, T0)])]); // no content: a download would fail
 
@@ -317,6 +336,30 @@ mod tests {
         assert!(only_log(&site).contains("Summary: no changes"));
         assert_eq!(snapshot_count(&site), 2);
         assert!(!site.files_dir().exists());
+    }
+
+    #[test]
+    fn exit_code_is_ok_without_changes_and_failures_with_changes() {
+        let (_dir, site) = site_with_baseline(&[entry("a.php", 5, T0)]);
+        let same =
+            check(&mut server(vec![("/site", vec![file("a.php", 5, T0)])]), &site, &settings(&[]), "s", NOW).unwrap();
+        assert_eq!(exit_code_for(&same), EXIT_OK);
+
+        let (_dir2, site2) = site_with_baseline(&[entry("a.php", 5, T0)]);
+        let changed =
+            check(&mut server(vec![("/site", vec![file("a.php", 6, T0)])]), &site2, &settings(&[]), "s", NOW).unwrap();
+        assert_eq!(exit_code_for(&changed), EXIT_FAILURES);
+    }
+
+    #[test]
+    fn site_name_uses_the_directory_name_and_resolves_dot() {
+        let dir = tempfile::tempdir().unwrap();
+        let sub = dir.path().join("test.com");
+        std::fs::create_dir(&sub).unwrap();
+        assert_eq!(_site_name(&sub), "test.com");
+        assert_eq!(_site_name(&sub.join("..").join("test.com")), "test.com");
+        assert!(!_site_name(Path::new(".")).is_empty());
+        assert_eq!(_site_name(Path::new("/")), "/");
     }
 
     #[test]

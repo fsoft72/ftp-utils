@@ -43,7 +43,10 @@ pub struct InitArgs {
     #[command(flatten)]
     pub common: CommonArgs,
 
-    /// Start over even if a snapshot already exists.
+    /// Start over even if a snapshot already exists. Records a new baseline
+    /// but keeps the existing files/ tree: same-size files are not downloaded
+    /// again and files deleted on the server are not removed locally. Delete
+    /// files/ by hand for a clean restart.
     #[arg(long)]
     pub force: bool,
 }

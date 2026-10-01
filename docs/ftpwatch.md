@@ -13,6 +13,9 @@ ftpwatch init  <SITE_DIR> [--password <pw>] [--verbose] [--force]
 ftpwatch check <SITE_DIR> [--password <pw>] [--verbose]
 ```
 
+`--verbose` prints progress diagnostics (connecting, files walked and
+downloaded) to stderr.
+
 ## Site directory
 
 One directory per site:
@@ -29,8 +32,9 @@ sites/test.com/
 ```
 
 Snapshot and log names are `YYYY-MM-DD_HHMMSS` in **UTC**. The latest
-snapshot is the one with the greatest name. Files are written atomically, so
-an interrupted run never leaves a half-written snapshot.
+snapshot is the one with the greatest name. Snapshots and logs are written
+atomically (to a `.part` file, then renamed), so an interrupted run never
+leaves a half-written one.
 
 ## config.json
 
@@ -61,9 +65,10 @@ WordPress example:
 
 ## Password
 
-In order of preference: the interactive prompt, the `FTPWATCH_PASSWORD`
-environment variable, the `--password` flag (least preferred: it can leak
-into shell history and process listings).
+Sources, highest priority first: the `--password` flag, then the
+`FTPWATCH_PASSWORD` environment variable, then the interactive prompt. Prefer
+the environment variable or the prompt: the flag can leak into shell history
+and process listings.
 
 ## init
 
@@ -72,6 +77,10 @@ into shell history and process listings).
 2. Walks the remote tree honoring `exclude` and downloads every file into
    `files/`.
 3. Writes the baseline snapshot. If anything fails, no snapshot is written.
+
+`--force` records a new baseline but keeps the existing `files/` tree:
+same-size files are not downloaded again and files deleted on the server are
+not removed locally. Delete `files/` by hand for a clean restart.
 
 ## check
 
@@ -94,9 +103,15 @@ Files are keyed by relative path:
 - `DELETED`: in the previous snapshot, absent now.
 - `MODIFIED`: the size differs, or the mtime differs.
 
-Modification times are always compared at **day precision**, because FTP
-listings give old files a date without a time of day. If either mtime is
-unknown, only the size is compared.
+Snapshots and logs store the modification time exactly as the server printed
+it in its LIST output, i.e. the server's local time (it is treated as UTC only
+for arithmetic). Only the run timestamp in the log header and the file-name
+stamps are real UTC. Modification times are always compared at **day
+precision**, because FTP listings give old files a date without a time of
+day. If either mtime is unknown, only the size is compared.
+
+Known limitation: after the server's time zone is reconfigured, files whose
+mtime is within the offset of midnight may be reported `MODIFIED` once.
 
 ## Safeguard
 
@@ -117,7 +132,8 @@ MODIFIED  wp-config.php  size 3021 -> 3050, mtime 2026-09-12 10:00:00 -> 2026-10
 ```
 
 When nothing changed, the log contains only the header, the previous snapshot
-and `Summary: no changes`. All times are UTC.
+and `Summary: no changes`. The header time is UTC; the `mtime` values are the
+server's local time as listed by the server (see Comparison rules).
 
 ## Exit codes
 
@@ -129,7 +145,9 @@ and `Summary: no changes`. All times are UTC.
 
 ## Scheduling
 
-ftpwatch has no built-in scheduler. Example crontab entry that sends a mail
+ftpwatch has no built-in scheduler. Do not run two `check` commands on the
+same site at once (no lock file in v1). Exit code 2 is an error: make sure
+cron delivers stderr (for example via `MAILTO`). Example crontab entry that sends a mail
 only when something changed:
 
 ```

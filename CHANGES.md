@@ -135,3 +135,5 @@
 - ftpwatch: site directory layout and atomic snapshot/log files.
 - ftpwatch: `init` (download + baseline) and `check` (listing-only scan, log, new snapshot) commands, site config.json, and CLI.
 - Documented ftpwatch (`docs/ftpwatch.md`, README, json.md, ftpdiff.md) and added server-free CLI tests; `check` now verifies the baseline before connecting; synced the design spec with the implementation. ftpwatch was NOT smoke-tested against a live FTP server (none was available); it is covered only by mock-based unit tests and server-free CLI tests.
+- ftpdiff: an interrupted pre-upgrade `--download-dir` run may leave `.<name>.ftpdiff-part` files; they can be deleted by hand (the temp suffix is now `.ftp-part`).
+- ftpwatch final-review fixes: corrected password precedence and mtime/time-zone docs, documented `init --force`, scheduling caveats and the ftpdiff `remote_mtime` column; logs are now written atomically; the site name falls back to the canonical path for `.`; added `exit_code_for`; doc comment and naming cleanups.

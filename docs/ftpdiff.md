@@ -135,8 +135,10 @@ columns:
 path,status,local_size,remote_size,local_md5,remote_md5,remote_mtime
 ```
 
-`remote_mtime` is the remote modification time in Unix seconds (UTC), empty
-when the server did not provide one. Older CSVs without this column are still
+`remote_mtime` is the remote modification time in Unix seconds, written by
+`--build` remote scans and empty otherwise (comparison reports leave it empty,
+and an mtime present in a `--remote-csv` input is not carried into the
+output). It is also empty when the server did not provide one. Older CSVs without this column are still
 accepted as `--local-csv`/`--remote-csv` input.
 
 This CSV is the expected input format for [`ftpops`](ftpops.md).

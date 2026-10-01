@@ -3,6 +3,7 @@
 use crate::compare::{Change, ChangeKind, Comparison, FileState};
 use crate::timefmt::format_datetime;
 
+/// Upper-case label of a change kind.
 fn _kind_label(kind: ChangeKind) -> &'static str {
     match kind {
         ChangeKind::New => "NEW",
@@ -33,6 +34,7 @@ fn _describe_modification(old: &FileState, new: &FileState) -> String {
     parts.join(", ")
 }
 
+/// One log line for a change: label, path and details.
 fn _change_line(change: &Change) -> String {
     let detail = match (change.kind, &change.old, &change.new) {
         (ChangeKind::New, _, Some(new)) => _describe(new),
@@ -44,7 +46,8 @@ fn _change_line(change: &Change) -> String {
 }
 
 /// Builds the text of a log file: a header, a summary and one line per
-/// change (already sorted by `compare_snapshots`). Times are UTC.
+/// change (already sorted by `compare_snapshots`). The header time is UTC; file
+/// mtimes are printed as the server listed them (its local time).
 pub fn format_log(site: &str, generated: i64, previous_snapshot: &str, comparison: &Comparison) -> String {
     let mut out = format!(
         "ftpwatch check - {site} - {} UTC\nPrevious snapshot: {previous_snapshot}\n",

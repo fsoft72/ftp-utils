@@ -15,6 +15,7 @@ use ftp_utils_core::exit::EXIT_ERROR;
 
 use cli::Cli;
 
+/// Parses the command line, runs the command and exits with its code.
 fn main() {
     let cli = Cli::parse();
 

@@ -49,6 +49,7 @@ impl From<DownloadError> for CliError {
         CliError(e.to_string())
     }
 }
+
 impl From<std::io::Error> for CliError {
     fn from(e: std::io::Error) -> Self {
         CliError(e.to_string())
