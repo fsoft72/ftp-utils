@@ -16,3 +16,5 @@ for tool_dir in tools/*/; do
     cp "target/release/$name" "bin/$name"
     echo "Copied $name to bin/$name"
 done
+
+scp bin/ftpwatch n04.os3.it:.local/bin/ftpwatch
