@@ -15,7 +15,7 @@ crate::message_error! {
 }
 
 /// CSV column names, in the order they are written.
-const COLUMNS: [&str; 6] = ["path", "status", "local_size", "remote_size", "local_md5", "remote_md5"];
+const COLUMNS: [&str; 7] = ["path", "status", "local_size", "remote_size", "local_md5", "remote_md5", "remote_mtime"];
 
 fn _column_index(headers: &csv::StringRecord, name: &str) -> Result<usize, CsvSourceError> {
     headers.iter().position(|h| h == name).ok_or_else(|| CsvSourceError(format!("CSV missing '{name}' column")))
@@ -84,6 +84,8 @@ pub struct ReportEntry {
     pub remote_size: Option<u64>,
     pub local_md5: Option<String>,
     pub remote_md5: Option<String>,
+    /// Modification time of the remote file, Unix seconds UTC.
+    pub remote_mtime: Option<i64>,
 }
 
 impl ReportEntry {
@@ -97,7 +99,14 @@ impl ReportEntry {
             remote_size,
             local_md5: None,
             remote_md5: None,
+            remote_mtime: None,
         }
+    }
+
+    /// Sets the remote modification time (Unix seconds, UTC) of this row.
+    pub fn with_remote_mtime(mut self, remote_mtime: Option<i64>) -> Self {
+        self.remote_mtime = remote_mtime;
+        self
     }
 }
 
@@ -110,6 +119,7 @@ impl From<&DiffEntry> for ReportEntry {
             remote_size: entry.remote_size,
             local_md5: entry.local_md5.clone(),
             remote_md5: entry.remote_md5.clone(),
+            remote_mtime: None,
         }
     }
 }
@@ -145,7 +155,7 @@ pub fn read_status_rows(path: &Path) -> Result<Vec<StatusRow>, CsvSourceError> {
 }
 
 /// Writes `entries` to `path` as a CSV report with the columns
-/// `path,status,local_size,remote_size,local_md5,remote_md5`.
+/// `path,status,local_size,remote_size,local_md5,remote_md5,remote_mtime`.
 pub fn write_report(path: &Path, entries: &[ReportEntry]) -> std::io::Result<()> {
     let to_io = |e: csv::Error| std::io::Error::other(e);
 
@@ -161,6 +171,7 @@ pub fn write_report(path: &Path, entries: &[ReportEntry]) -> std::io::Result<()>
                 entry.remote_size.map(|v| v.to_string()).unwrap_or_default(),
                 entry.local_md5.clone().unwrap_or_default(),
                 entry.remote_md5.clone().unwrap_or_default(),
+                entry.remote_mtime.map(|v| v.to_string()).unwrap_or_default(),
             ])
             .map_err(to_io)?;
     }
@@ -172,13 +183,22 @@ struct RawRow {
     relative_path: String,
     size: Option<u64>,
     md5: Option<String>,
+    mtime: Option<i64>,
 }
 
-fn read_side(path: &Path, size_column: &str, md5_column: &str) -> Result<Vec<RawRow>, CsvSourceError> {
+/// Reads the size, md5 and (optionally) mtime columns of every row. A
+/// missing `mtime_column` is not an error: older reports lack it.
+fn read_side(
+    path: &Path,
+    size_column: &str,
+    md5_column: &str,
+    mtime_column: Option<&str>,
+) -> Result<Vec<RawRow>, CsvSourceError> {
     let (mut reader, headers) = _open(path)?;
     let path_idx = _column_index(&headers, "path")?;
     let size_idx = _column_index(&headers, size_column)?;
     let md5_idx = _column_index(&headers, md5_column)?;
+    let mtime_idx = mtime_column.and_then(|name| headers.iter().position(|h| h == name));
 
     let mut rows = Vec::new();
     for result in reader.records() {
@@ -197,7 +217,14 @@ fn read_side(path: &Path, size_column: &str, md5_column: &str) -> Result<Vec<Raw
         let md5_str = record.get(md5_idx).unwrap_or("");
         let md5 = if md5_str.is_empty() { None } else { Some(md5_str.to_string()) };
 
-        rows.push(RawRow { relative_path, size, md5 });
+        let mtime = match mtime_idx.and_then(|idx| record.get(idx)).filter(|s| !s.is_empty()) {
+            None => None,
+            Some(text) => Some(text.parse::<i64>().map_err(|e| {
+                CsvSourceError(format!("row for '{relative_path}' has invalid remote_mtime '{text}': {e}"))
+            })?),
+        };
+
+        rows.push(RawRow { relative_path, size, md5, mtime });
     }
 
     Ok(rows)
@@ -208,7 +235,7 @@ fn read_side(path: &Path, size_column: &str, md5_column: &str) -> Result<Vec<Raw
 /// `local_size` are skipped (they had no local file in the original
 /// report).
 pub fn read_local_entries(path: &Path) -> Result<(Vec<LocalEntry>, HashMap<String, String>), CsvSourceError> {
-    let rows = read_side(path, "local_size", "local_md5")?;
+    let rows = read_side(path, "local_size", "local_md5", None)?;
 
     let mut entries = Vec::new();
     let mut known_md5 = HashMap::new();
@@ -229,7 +256,7 @@ pub fn read_local_entries(path: &Path) -> Result<(Vec<LocalEntry>, HashMap<Strin
 /// Rows without a `remote_size` are skipped (they had no remote file in
 /// the original report).
 pub fn read_remote_entries(path: &Path) -> Result<(Vec<RemoteEntry>, HashMap<String, String>), CsvSourceError> {
-    let rows = read_side(path, "remote_size", "remote_md5")?;
+    let rows = read_side(path, "remote_size", "remote_md5", Some("remote_mtime"))?;
 
     let mut entries = Vec::new();
     let mut known_md5 = HashMap::new();
@@ -238,7 +265,7 @@ pub fn read_remote_entries(path: &Path) -> Result<(Vec<RemoteEntry>, HashMap<Str
             if let Some(md5) = row.md5 {
                 known_md5.insert(row.relative_path.clone(), md5);
             }
-            entries.push(RemoteEntry { relative_path: row.relative_path, size, modified: None });
+            entries.push(RemoteEntry { relative_path: row.relative_path, size, modified: row.mtime });
         }
     }
 
@@ -334,8 +361,39 @@ mod tests {
 
         let content = std::fs::read_to_string(&path).unwrap();
         let mut lines = content.lines();
-        assert_eq!(lines.next().unwrap(), "path,status,local_size,remote_size,local_md5,remote_md5");
-        assert_eq!(lines.next().unwrap(), "a.txt,SizeMismatch,10,20,,");
+        assert_eq!(lines.next().unwrap(), "path,status,local_size,remote_size,local_md5,remote_md5,remote_mtime");
+        assert_eq!(lines.next().unwrap(), "a.txt,SizeMismatch,10,20,,,");
+    }
+
+    #[test]
+    fn remote_mtime_round_trips_and_old_csvs_still_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("snap.csv");
+        let entries = vec![
+            ReportEntry::scan("a.txt", None, Some(3)).with_remote_mtime(Some(1_578_182_400)),
+            ReportEntry::scan("b.txt", None, Some(4)),
+        ];
+
+        write_report(&path, &entries).unwrap();
+
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert!(content.starts_with("path,status,local_size,remote_size,local_md5,remote_md5,remote_mtime\n"));
+        let (remote, _) = read_remote_entries(&path).unwrap();
+        assert_eq!(remote[0].modified, Some(1_578_182_400));
+        assert_eq!(remote[1].modified, None);
+
+        // A report written before the column existed has no mtime at all.
+        let (_dir2, old) = write_csv(&format!("{HEADER}a.txt,Scan,,3,,\n"));
+        let (remote, _) = read_remote_entries(&old).unwrap();
+        assert_eq!(remote[0].modified, None);
+    }
+
+    #[test]
+    fn errors_on_malformed_mtime_value() {
+        let (_dir, path) =
+            write_csv(&format!("{},remote_mtime\na.txt,Scan,,3,,,yesterday\n", &HEADER[..HEADER.len() - 1]));
+
+        assert!(read_remote_entries(&path).is_err());
     }
 
     #[test]

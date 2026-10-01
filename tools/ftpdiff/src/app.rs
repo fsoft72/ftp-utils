@@ -377,7 +377,7 @@ fn scan_remote<C: FtpConnection>(
 ) -> Result<Vec<ReportEntry>, CliError> {
     let mut entries = Vec::new();
     for item in walk_and_download(conn, remote_dir, exclude, download_dir, verbose, progress)? {
-        let mut entry = ReportEntry::scan(item.relative_path, None, Some(item.size));
+        let mut entry = ReportEntry::scan(item.relative_path, None, Some(item.size)).with_remote_mtime(item.modified);
         if hash {
             let remote_path = remote::join_remote(remote_dir, &entry.relative_path);
             let md5 = hash::remote_md5(conn, &remote_path)

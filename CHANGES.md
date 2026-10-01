@@ -128,3 +128,4 @@
 - Git hooks: `pre-commit` now only refreshes the codegraph index (optional, never blocks); removed dprint formatting and pnpm lockfile regeneration from the hook and its README.
 - Added design spec for `ftpwatch` (`docs/superpowers/specs/2026-10-01-ftpwatch-design.md`): site monitor with `init` (full download + baseline snapshot) and `check` (listing-only scan, size+mtime comparison, text log).
 - Remote listings now carry the file modification time (`RawRemoteEntry::modified`, `RemoteEntry::modified`, Unix seconds UTC).
+- CSV reports gained an optional trailing `remote_mtime` column (Unix seconds UTC); old reports without it still read fine. `ftpdiff --build` records it for remote scans.
