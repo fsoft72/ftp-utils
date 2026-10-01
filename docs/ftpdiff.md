@@ -132,8 +132,12 @@ With `--csv <path>`, the same results are also written as a CSV file with
 columns:
 
 ```
-path,status,local_size,remote_size,local_md5,remote_md5
+path,status,local_size,remote_size,local_md5,remote_md5,remote_mtime
 ```
+
+`remote_mtime` is the remote modification time in Unix seconds (UTC), empty
+when the server did not provide one. Older CSVs without this column are still
+accepted as `--local-csv`/`--remote-csv` input.
 
 This CSV is the expected input format for [`ftpops`](ftpops.md).
 

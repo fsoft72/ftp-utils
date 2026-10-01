@@ -87,6 +87,19 @@ invocation's operation, not a reusable connection default).
 }
 ```
 
+## ftpwatch
+
+`ftpwatch` does not take `--config`: it reads `config.json` from the site
+directory, with the shared connection fields (`host`, `port`, `user`,
+`remote_dir`, `ftps`, `insecure_tls`, `timeout`) plus an `exclude` list of
+globs. See [`ftpwatch.md`](ftpwatch.md).
+
+## CSV reports
+
+CSV reports written by `ftpdiff --csv` (and by `ftpwatch` snapshots) carry a
+trailing `remote_mtime` column (Unix seconds, empty when unknown). Older CSVs
+without it are still read, and `ftpops` ignores it.
+
 ## Unknown fields
 
 Extra fields in the JSON file that a tool doesn't recognize are silently

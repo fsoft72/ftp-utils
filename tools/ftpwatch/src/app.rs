@@ -3,6 +3,8 @@
 //! functions generic over `FtpConnection` so it can be tested without a
 //! server.
 
+use std::path::PathBuf;
+
 use ftp_utils_core::connection::{self, ConnectionError, RemoteParams};
 use ftp_utils_core::download::{DownloadError, Downloader};
 use ftp_utils_core::exclude::ExcludeSet;
@@ -94,6 +96,9 @@ fn run_check(common: &CommonArgs) -> Result<i32, CliError> {
     let settings = config::load(&site.config_path())?;
     let site_name = site.root().file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
 
+    // Verify the baseline before connecting, so a missing one never reaches the password prompt.
+    _latest_snapshot_or_error(&site)?;
+
     let now = now_unix();
     let mut conn = connect(&settings.remote, common)?;
     let comparison = check(&mut conn, &site, &settings, &site_name, now)?;
@@ -145,12 +150,16 @@ pub fn init<C: FtpConnection>(
     Ok(entries.len())
 }
 
+/// Returns the latest snapshot path, or the "run `ftpwatch init` first" error.
+fn _latest_snapshot_or_error(site: &SiteDir) -> Result<PathBuf, CliError> {
+    site.latest_snapshot()?
+        .ok_or_else(|| CliError(format!("no snapshot found for {}; run `ftpwatch init` first", site.root().display())))
+}
+
 /// Reads the latest snapshot without the entries the current excludes
 /// would skip (so adding an exclude does not report those files deleted).
 fn _load_previous(site: &SiteDir, exclude: &ExcludeSet) -> Result<(String, Vec<RemoteEntry>), CliError> {
-    let path = site.latest_snapshot()?.ok_or_else(|| {
-        CliError(format!("no snapshot found for {}; run `ftpwatch init` first", site.root().display()))
-    })?;
+    let path = _latest_snapshot_or_error(site)?;
     let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     let entries = store::read_snapshot(&path)?.into_iter().filter(|e| !exclude.is_excluded(&e.relative_path)).collect();
     Ok((name, entries))

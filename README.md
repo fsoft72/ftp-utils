@@ -34,6 +34,22 @@ ftpops copy --to local --filter remote-only --csv report.csv \
 See [`docs/ftpops.md`](docs/ftpops.md) for full usage, or
 `docs/superpowers/specs/2026-09-21-ftpops-design.md` for the design spec.
 
+### ftpwatch
+
+Monitors a site for added, deleted and modified files. `ftpwatch init`
+downloads the site once and records a baseline snapshot; `ftpwatch check`
+only lists the remote tree, compares it with the previous snapshot and
+writes a plain-text log (exit code 1 when changes were found, so it fits
+cron jobs).
+
+```sh
+ftpwatch init sites/test.com
+ftpwatch check sites/test.com
+```
+
+See [`docs/ftpwatch.md`](docs/ftpwatch.md) for full usage, or
+`docs/superpowers/specs/2026-10-01-ftpwatch-design.md` for the design spec.
+
 ### `--config` JSON files
 
 Every tool accepts `--config <path>` to a JSON file of default option

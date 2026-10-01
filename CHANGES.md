@@ -134,3 +134,4 @@
 - ftpwatch: UTC time formatting and the plain-text change log formatter.
 - ftpwatch: site directory layout and atomic snapshot/log files.
 - ftpwatch: `init` (download + baseline) and `check` (listing-only scan, log, new snapshot) commands, site config.json, and CLI.
+- Documented ftpwatch (`docs/ftpwatch.md`, README, json.md, ftpdiff.md) and added server-free CLI tests; `check` now verifies the baseline before connecting; synced the design spec with the implementation. ftpwatch was NOT smoke-tested against a live FTP server (none was available); it is covered only by mock-based unit tests and server-free CLI tests.
