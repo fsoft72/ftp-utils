@@ -131,3 +131,4 @@
 - CSV reports gained an optional trailing `remote_mtime` column (Unix seconds UTC); old reports without it still read fine. `ftpdiff --build` records it for remote scans.
 - Moved the streaming downloader (`.part` file, same-size skip, path validation) from ftpdiff into `ftp_utils_core::download`; the temporary file is now `.<name>.ftp-part`.
 - Added the `ftpwatch` crate skeleton with the pure snapshot comparison (new/deleted/modified; size + mtime at day precision).
+- ftpwatch: UTC time formatting and the plain-text change log formatter.

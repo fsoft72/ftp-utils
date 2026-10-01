@@ -5,5 +5,7 @@
 #![allow(dead_code)]
 
 mod compare;
+mod log;
+mod timefmt;
 
 fn main() {}
