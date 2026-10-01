@@ -1,5 +1,7 @@
 /target
 /bin
 *.swp
+/tmp
 .DS_Store
 /local-data
+.codegraph/
