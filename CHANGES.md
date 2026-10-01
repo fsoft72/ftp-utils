@@ -125,3 +125,4 @@
 - Split `Scan` out of `DiffStatus`: new `ReportStatus`/`ReportEntry` in `csv_source` model report rows (comparison or scan); the CSV format is unchanged.
 - Added `rustfmt.toml` and a GitHub Actions workflow running `cargo fmt --check`, `cargo clippy -D warnings` and `cargo test`.
 - Added `ftpdiff --download-dir <PATH>` (JSON `download_dir`): downloads every non-excluded remote file in binary mode while the remote walk runs (new `remote::walk_remote_with` callback), streamed via a `.part` file renamed on success, skipping files already present with the same size; rejects `..`/absolute paths; needs a live remote side (also works with `--build` on the remote).
+- Git hooks: `pre-commit` now only refreshes the codegraph index (optional, never blocks); removed dprint formatting and pnpm lockfile regeneration from the hook and its README.
