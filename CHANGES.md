@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- FTP client: use EPSV instead of PASV when the control connection is IPv6
+  (servers answer `425 You cannot use PASV on IPv6 connections`).
 - Set up Cargo workspace structure for the ftp-utils monorepo
   (`crates/ftp-utils-core`, `tools/ftpdiff`).
 - Added design spec for the monorepo layout and the ftpdiff tool

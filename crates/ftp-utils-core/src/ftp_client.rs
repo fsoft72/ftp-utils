@@ -8,6 +8,7 @@ use std::time::Duration;
 use suppaftp::list::ListParser;
 use suppaftp::native_tls::TlsConnector;
 use suppaftp::types::FileType;
+use suppaftp::Mode;
 use suppaftp::Status;
 use suppaftp::{FtpStream, ImplFtpStream, NativeTlsConnector, NativeTlsFtpStream, TlsStream};
 
@@ -47,13 +48,18 @@ fn _connect_with_timeout<T: TlsStream>(
         tcp.set_read_timeout(Some(timeout)).map_err(|e| FtpConnectionError(e.to_string()))?;
         tcp.set_write_timeout(Some(timeout)).map_err(|e| FtpConnectionError(e.to_string()))?;
 
-        let stream = match ImplFtpStream::<T>::connect_with_stream(tcp) {
+        let mut stream = match ImplFtpStream::<T>::connect_with_stream(tcp) {
             Ok(stream) => stream,
             Err(e) => {
                 last_error = _ftp_error(e);
                 continue;
             }
         };
+
+        // PASV is not allowed on IPv6 control connections (RFC 2428): use EPSV there.
+        if address.is_ipv6() {
+            stream.set_mode(Mode::ExtendedPassive);
+        }
 
         return Ok(stream.passive_stream_builder(move |data_address| {
             let data =
