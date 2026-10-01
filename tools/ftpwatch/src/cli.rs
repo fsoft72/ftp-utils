@@ -33,7 +33,8 @@ pub struct CommonArgs {
     #[arg(long)]
     pub password: Option<String>,
 
-    /// Print progress diagnostics to stderr.
+    /// Print progress diagnostics to stderr: the connection and one line per
+    /// scanned file (`Checking remote: <path>`), plus each download in `init`.
     #[arg(long)]
     pub verbose: bool,
 }

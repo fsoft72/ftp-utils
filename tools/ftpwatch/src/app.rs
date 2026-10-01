@@ -76,6 +76,12 @@ fn connect(params: &RemoteParams, common: &CommonArgs) -> Result<SuppaFtpConnect
         .map_err(|e| CliError(format!("failed to connect to {}:{}: {e}", params.host, params.port)))
 }
 
+/// Returns the `--verbose` progress printer, which writes one line per scanned
+/// file to stderr, or `None` when not verbose.
+fn _make_progress(verbose: bool) -> Option<impl FnMut(&str)> {
+    verbose.then_some(|message: &str| eprintln!("Checking {message}"))
+}
+
 /// Runs the `init` command: loads config, connects, downloads, records the baseline.
 fn run_init(common: &CommonArgs, force: bool) -> Result<i32, CliError> {
     let site = SiteDir::new(common.site_dir.clone());
@@ -83,7 +89,15 @@ fn run_init(common: &CommonArgs, force: bool) -> Result<i32, CliError> {
     ensure_can_init(&site, force)?;
 
     let mut conn = connect(&settings.remote, common)?;
-    let count = init(&mut conn, &site, &settings, now_unix(), common.verbose)?;
+    let mut progress = _make_progress(common.verbose);
+    let count = init(
+        &mut conn,
+        &site,
+        &settings,
+        now_unix(),
+        common.verbose,
+        progress.as_mut().map(|p| p as &mut dyn FnMut(&str)),
+    )?;
     conn.close();
 
     println!("Downloaded {count} files to {} and recorded the baseline snapshot.", site.files_dir().display());
@@ -101,7 +115,9 @@ fn run_check(common: &CommonArgs) -> Result<i32, CliError> {
 
     let now = now_unix();
     let mut conn = connect(&settings.remote, common)?;
-    let comparison = check(&mut conn, &site, &settings, &site_name, now)?;
+    let mut progress = _make_progress(common.verbose);
+    let comparison =
+        check(&mut conn, &site, &settings, &site_name, now, progress.as_mut().map(|p| p as &mut dyn FnMut(&str)))?;
     conn.close();
 
     println!(
@@ -149,19 +165,22 @@ pub fn ensure_can_init(site: &SiteDir, force: bool) -> Result<(), CliError> {
 
 /// Walks the remote tree downloading every non-excluded file into the
 /// site's `files/` directory, then writes the baseline snapshot. Returns
-/// the number of files. No snapshot is written if anything fails.
+/// the number of files. `progress`, if given, is called with
+/// `remote: <path>` for every scanned file. No snapshot is written if
+/// anything fails.
 pub fn init<C: FtpConnection>(
     conn: &mut C,
     site: &SiteDir,
     settings: &SiteSettings,
     now: i64,
     verbose: bool,
+    progress: Option<&mut (dyn FnMut(&str) + '_)>,
 ) -> Result<usize, CliError> {
     let files_dir = site.files_dir();
     let remote_root = settings.remote.remote_dir.as_str();
     let mut downloader = Downloader::new(&files_dir, remote_root, verbose);
 
-    let entries = remote::walk_remote_with(conn, remote_root, &settings.exclude, None, |conn, entry| {
+    let entries = remote::walk_remote_with(conn, remote_root, &settings.exclude, progress, |conn, entry| {
         downloader.fetch(conn, entry).map_err(CliError::from)
     })?;
 
@@ -188,15 +207,17 @@ fn _load_previous(site: &SiteDir, exclude: &ExcludeSet) -> Result<(String, Vec<R
 /// with the latest snapshot, writes the log and then today's snapshot.
 /// Nothing is written if the scan fails or returns no files while the
 /// previous snapshot had some, so a broken run cannot corrupt the history.
+/// `progress`, if given, is called with `remote: <path>` for every scanned file.
 pub fn check<C: FtpConnection>(
     conn: &mut C,
     site: &SiteDir,
     settings: &SiteSettings,
     site_name: &str,
     now: i64,
+    progress: Option<&mut (dyn FnMut(&str) + '_)>,
 ) -> Result<Comparison, CliError> {
     let (previous_name, previous) = _load_previous(site, &settings.exclude)?;
-    let current = remote::walk_remote(conn, &settings.remote.remote_dir, &settings.exclude, None)?;
+    let current = remote::walk_remote(conn, &settings.remote.remote_dir, &settings.exclude, progress)?;
 
     if current.is_empty() && !previous.is_empty() {
         return Err(CliError(format!(
@@ -292,7 +313,7 @@ mod tests {
         ]);
         conn.default_content = Some(b"hello".to_vec());
 
-        let count = init(&mut conn, &site, &settings(&["wp-content/uploads/**"]), NOW, false).unwrap();
+        let count = init(&mut conn, &site, &settings(&["wp-content/uploads/**"]), NOW, false, None).unwrap();
 
         assert_eq!(count, 2);
         assert_eq!(std::fs::read(site.files_dir().join("index.php")).unwrap(), b"hello");
@@ -308,7 +329,7 @@ mod tests {
         let site = SiteDir::new(dir.path().to_path_buf());
         let mut conn = server(vec![("/site", vec![file("index.php", 5, T0)])]); // no content: download fails
 
-        assert!(init(&mut conn, &site, &settings(&[]), NOW, false).is_err());
+        assert!(init(&mut conn, &site, &settings(&[]), NOW, false, None).is_err());
 
         assert_eq!(site.latest_snapshot().unwrap(), None);
     }
@@ -330,7 +351,7 @@ mod tests {
         let (_dir, site) = site_with_baseline(&[entry("index.php", 5, T0)]);
         let mut conn = server(vec![("/site", vec![file("index.php", 5, T0)])]); // no content: a download would fail
 
-        let comparison = check(&mut conn, &site, &settings(&[]), "test.com", NOW).unwrap();
+        let comparison = check(&mut conn, &site, &settings(&[]), "test.com", NOW, None).unwrap();
 
         assert!(comparison.changes.is_empty());
         assert!(only_log(&site).contains("Summary: no changes"));
@@ -342,12 +363,14 @@ mod tests {
     fn exit_code_is_ok_without_changes_and_failures_with_changes() {
         let (_dir, site) = site_with_baseline(&[entry("a.php", 5, T0)]);
         let same =
-            check(&mut server(vec![("/site", vec![file("a.php", 5, T0)])]), &site, &settings(&[]), "s", NOW).unwrap();
+            check(&mut server(vec![("/site", vec![file("a.php", 5, T0)])]), &site, &settings(&[]), "s", NOW, None)
+                .unwrap();
         assert_eq!(exit_code_for(&same), EXIT_OK);
 
         let (_dir2, site2) = site_with_baseline(&[entry("a.php", 5, T0)]);
         let changed =
-            check(&mut server(vec![("/site", vec![file("a.php", 6, T0)])]), &site2, &settings(&[]), "s", NOW).unwrap();
+            check(&mut server(vec![("/site", vec![file("a.php", 6, T0)])]), &site2, &settings(&[]), "s", NOW, None)
+                .unwrap();
         assert_eq!(exit_code_for(&changed), EXIT_FAILURES);
     }
 
@@ -371,7 +394,7 @@ mod tests {
             vec![file("edit.php", 6, T0), file("same.php", 9, T0), file("brand-new.php", 3, T0 + 500)],
         )]);
 
-        let comparison = check(&mut conn, &site, &settings(&[]), "test.com", NOW).unwrap();
+        let comparison = check(&mut conn, &site, &settings(&[]), "test.com", NOW, None).unwrap();
 
         assert_eq!(comparison.changes.len(), 3);
         let log = only_log(&site);
@@ -389,7 +412,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let site = SiteDir::new(dir.path().to_path_buf());
 
-        let err = check(&mut server(vec![]), &site, &settings(&[]), "s", NOW).unwrap_err();
+        let err = check(&mut server(vec![]), &site, &settings(&[]), "s", NOW, None).unwrap_err();
 
         assert!(err.to_string().contains("ftpwatch init"), "{err}");
     }
@@ -399,7 +422,7 @@ mod tests {
         let (_dir, site) = site_with_baseline(&[entry("index.php", 5, T0)]);
         let mut conn = server(vec![("/site", vec![file("index.php", 5, T0), dir("sub")])]); // /site/sub has no listing
 
-        assert!(check(&mut conn, &site, &settings(&[]), "s", NOW).is_err());
+        assert!(check(&mut conn, &site, &settings(&[]), "s", NOW, None).is_err());
 
         assert_eq!(snapshot_count(&site), 1);
         assert!(!site.root().join("logs").exists());
@@ -410,7 +433,7 @@ mod tests {
         let (_dir, site) = site_with_baseline(&[entry("index.php", 5, T0)]);
         let mut conn = server(vec![("/site", vec![])]);
 
-        let err = check(&mut conn, &site, &settings(&[]), "s", NOW).unwrap_err();
+        let err = check(&mut conn, &site, &settings(&[]), "s", NOW, None).unwrap_err();
 
         assert!(err.to_string().contains("empty"), "{err}");
         assert_eq!(snapshot_count(&site), 1);
@@ -422,8 +445,38 @@ mod tests {
         let (_dir, site) = site_with_baseline(&[entry("index.php", 5, T0), entry("cache/x.tmp", 1, T0)]);
         let mut conn = server(vec![("/site", vec![file("index.php", 5, T0)])]);
 
-        let comparison = check(&mut conn, &site, &settings(&["cache/**"]), "s", NOW).unwrap();
+        let comparison = check(&mut conn, &site, &settings(&["cache/**"]), "s", NOW, None).unwrap();
 
         assert!(comparison.changes.is_empty(), "{:?}", comparison.changes);
+    }
+
+    #[test]
+    fn init_reports_each_scanned_file_to_the_progress_callback() {
+        let tmp = tempfile::tempdir().unwrap();
+        let site = SiteDir::new(tmp.path().to_path_buf());
+        let mut conn = server(vec![
+            ("/site", vec![file("index.php", 5, T0), file("skip.tmp", 1, T0), dir("sub")]),
+            ("/site/sub", vec![file("a.php", 5, T0)]),
+        ]);
+        conn.default_content = Some(b"hello".to_vec());
+        let mut seen: Vec<String> = Vec::new();
+
+        init(&mut conn, &site, &settings(&["*.tmp"]), NOW, false, Some(&mut |m: &str| seen.push(m.to_string())))
+            .unwrap();
+
+        seen.sort();
+        assert_eq!(seen, vec!["remote: index.php".to_string(), "remote: sub/a.php".to_string()]);
+    }
+
+    #[test]
+    fn check_reports_each_scanned_file_to_the_progress_callback() {
+        let (_dir, site) = site_with_baseline(&[entry("index.php", 5, T0)]);
+        let mut conn = server(vec![("/site", vec![file("index.php", 5, T0), file("new.php", 3, T0)])]);
+        let mut seen: Vec<String> = Vec::new();
+
+        check(&mut conn, &site, &settings(&[]), "s", NOW, Some(&mut |m: &str| seen.push(m.to_string()))).unwrap();
+
+        seen.sort();
+        assert_eq!(seen, vec!["remote: index.php".to_string(), "remote: new.php".to_string()]);
     }
 }

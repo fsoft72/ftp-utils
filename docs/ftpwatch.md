@@ -13,8 +13,9 @@ ftpwatch init  <SITE_DIR> [--password <pw>] [--verbose] [--force]
 ftpwatch check <SITE_DIR> [--password <pw>] [--verbose]
 ```
 
-`--verbose` prints progress diagnostics (connecting, files walked and
-downloaded) to stderr.
+`--verbose` prints progress diagnostics to stderr: the connection, one
+`Checking remote: <path>` line for every file scanned (excluded files are
+not listed), and each `Downloading <path>` during `init`.
 
 ## Site directory
 
