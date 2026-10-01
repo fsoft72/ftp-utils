@@ -4,6 +4,7 @@ members = [
     "crates/ftp-utils-core",
     "tools/ftpdiff",
     "tools/ftpops",
+    "tools/ftpwatch",
 ]
 
 [workspace.package]
